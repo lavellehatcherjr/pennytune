@@ -193,7 +193,12 @@ from the SEC `company_tickers_exchange.json` listed-company file - and all
 filings, fundamentals, and insider forms), plus the **SEC fails-to-deliver /
 trading-suspension files** and **GDELT** news for context. The only identity
 required anywhere is the SEC EDGAR `User-Agent` string (your name + email) - a
-request header the SEC requires, not an account or key.
+request header the SEC's fair-access policy requires to identify the requester,
+not a PennyTune account, login, or key. It is stored only in your local config
+(redacted in `config get`), sent only in the SEC request header, and never
+transmitted to the author or any third party - GDELT requests use a generic
+keyless User-Agent, so your email reaches only the SEC. Any valid personal email
+works; setup checks the format, not the provider.
 
 > **GDELT attribution (required).** Any use or redistribution of GDELT-derived
 > output must credit *The GDELT Project* (<https://www.gdeltproject.org/>).
