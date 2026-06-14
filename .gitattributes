@@ -1,0 +1,33 @@
+# Cross-platform line-ending normalization.
+# The tri-OS CI matrix (Linux/macOS/Windows) must never break on CRLF/LF
+# differences, and test-fixture data files in particular must stay
+# byte-identical across platforms so parser tests don't fail on one OS only.
+
+# Normalize all text files to LF in the repository.
+* text=auto eol=lf
+
+# Explicitly treat common source/text/data-fixture types as LF text.
+*.py    text eol=lf
+*.toml  text eol=lf
+*.cfg   text eol=lf
+*.ini   text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.json  text eol=lf
+*.csv   text eol=lf
+*.tsv   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.lock  text eol=lf
+LICENSE text eol=lf
+
+# Binary types — never normalize, never diff as text.
+*.parquet binary
+*.duckdb  binary
+*.db      binary
+*.png     binary
+*.ico     binary
+*.gz      binary
+*.zip     binary
+*.whl     binary
+*.pdf     binary
