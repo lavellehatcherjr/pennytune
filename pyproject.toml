@@ -1,0 +1,90 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pennytune"
+version = "0.1.0"
+description = "PennyTune is a free, no-API-key command-line forensic due-diligence tool for US-listed micro-caps: it surfaces risk signals and forensic flags from a company's SEC filings - accounting-quality and distress scores, dilution and corporate-action risk, insider activity, 8-K material events, delisting-notice and active trading-suspension risk, fails-to-deliver settlement context, and news-coverage characterization - each traced to the underlying filing, for research only, not investment advice."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Lavelle Hatcher Jr" }]
+requires-python = ">=3.11"
+keywords = [
+    "due-diligence", "forensic-accounting", "sec-edgar", "fundamental-analysis",
+    "value-investing", "microcap", "equities", "finance", "cli",
+    "stock-analysis", "dilution", "short-interest", "altman-z-score",
+    "piotroski", "penny-stocks",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "pandas==3.0.3",
+    "numpy>=2.4.1",
+    "duckdb==1.5.3",
+    "pyarrow>=14.0.1",
+    "edgartools",
+    "vaderSentiment==3.3.2",
+    "typer",
+    "rich",
+    "pyfiglet",
+    "pydantic",
+    "platformdirs",
+    "tomli-w",
+    "pyrate-limiter",
+    "tenacity",
+    "defusedxml",
+    "requests>=2.32.4",
+    "httpx",
+]
+
+[project.optional-dependencies]
+schema = ["pydantic", "tomli-w"]
+dev = ["pytest", "pytest-asyncio", "pytest-mock", "responses", "ruff", "mypy==2.1.0", "pip-audit", "build", "twine"]
+
+[project.urls]
+Homepage = "https://github.com/lavellehatcherjr/pennytune"
+Repository = "https://github.com/lavellehatcherjr/pennytune"
+Issues = "https://github.com/lavellehatcherjr/pennytune/issues"
+
+[project.scripts]
+pennytune = "pennytune.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pennytune"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "tests"]
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+strict_equality = true
+ignore_missing_imports = true
