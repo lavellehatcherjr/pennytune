@@ -224,8 +224,8 @@ pipx install pennytune       # isolated install via pipx
 uv tool install pennytune    # the same, via uv's tool installer
 ```
 
-Requires Python 3.11-3.13 (3.13 is the primary target). Python 3.14 is not yet
-CI-verified.
+Requires Python 3.11-3.14 (all CI-tested across Linux, macOS, and Windows; 3.13
+is the primary target for linting and type-checking).
 
 **From source (for development):**
 
