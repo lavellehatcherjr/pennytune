@@ -5,7 +5,7 @@
 [![CI](https://github.com/lavellehatcherjr/pennytune/actions/workflows/ci.yml/badge.svg)](https://github.com/lavellehatcherjr/pennytune/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/pennytune)](https://pypi.org/project/pennytune/)
 [![Downloads](https://img.shields.io/pepy/dt/pennytune)](https://pepy.tech/project/pennytune)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-blue)](https://github.com/lavellehatcherjr/pennytune/actions/workflows/ci.yml)
 
@@ -308,7 +308,7 @@ Upgrades are deliberate and reviewed; nothing auto-merges.
 
 ## License
 
-[Apache-2.0](LICENSE). © Lavelle Hatcher Jr.
+[MIT](LICENSE). © Lavelle Hatcher Jr.
 
 ---
 
