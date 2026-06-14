@@ -1,0 +1,112 @@
+PennyTune
+Copyright 2026 Lavelle Hatcher Jr
+
+This product includes software developed by Lavelle Hatcher Jr.
+
+Licensed under the Apache License, Version 2.0 (the "License").
+You may obtain a copy of the License in the LICENSE file at the root of this
+repository, or at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+
+================================================================================
+Third-Party Software Attribution
+================================================================================
+
+PennyTune depends on third-party open-source libraries, each distributed under
+its own license. The full license text for each is available on PyPI and in the
+distribution of each installed package. The complete resolved dependency set,
+exact versions, and hashes are recorded in `uv.lock`.
+
+--------------------------------------------------------------------------------
+Runtime dependencies
+--------------------------------------------------------------------------------
+- pandas               BSD-3-Clause     Pandas Development Team
+- numpy                BSD-3-Clause     NumPy Developers
+                       (compound SPDX; includes bundled-library licenses)
+- duckdb               MIT              DuckDB Foundation
+- pyarrow              Apache-2.0       Apache Arrow Developers
+- edgartools           MIT              Dwight Gunning
+- vaderSentiment       MIT              C.J. Hutto
+- typer                MIT              Sebastian Ramirez
+- rich                 MIT              Will McGugan
+- pyfiglet             MIT              Peter Waller and contributors
+- pydantic             MIT              Samuel Colvin and contributors
+- pydantic-core        MIT              Samuel Colvin and contributors
+- platformdirs         MIT              platformdirs contributors
+- tomli-w              MIT              Taneli Hukkinen
+- pyrate-limiter       MIT              vutr
+- tenacity             Apache-2.0       Julien Danjou
+- defusedxml           PSF-2.0          Christian Heimes
+                       (Python Software Foundation License)
+- requests             Apache-2.0       Kenneth Reitz and contributors
+
+--------------------------------------------------------------------------------
+Notable transitive dependencies (installed with the above; ship to users)
+--------------------------------------------------------------------------------
+- httpx                BSD-3-Clause     Tom Christie (required by edgartools)
+- httpcore             BSD-3-Clause     Encode
+- httpxthrottlecache   MIT              paultiq (required by edgartools)
+- anyio                MIT              Encode
+- h11                  MIT
+- idna                 BSD-3-Clause
+- certifi              MPL-2.0          Kenneth Reitz
+                       (bundles the Mozilla CA certificate list)
+- lxml                 BSD-3-Clause     lxml dev team
+- beautifulsoup4       MIT              Leonard Richardson
+- soupsieve            MIT
+- jinja2               BSD-3-Clause     Pallets
+- markupsafe           BSD-3-Clause     Pallets
+- orjson               MPL-2.0 AND (Apache-2.0 OR MIT)
+- pygments             BSD-2-Clause
+- markdown-it-py       MIT
+- mdurl                MIT
+- rapidfuzz            MIT
+- textdistance         MIT
+- tabulate             MIT
+- python-dateutil      BSD-3-Clause / Apache-2.0 (dual)
+- six                  MIT              Benjamin Peterson
+- typing-extensions    PSF-2.0
+- typing-inspection    MIT
+- annotated-types      MIT
+- humanize             MIT
+- tqdm                 MPL-2.0 AND MIT
+- truststore           MIT
+- nest-asyncio         BSD-2-Clause
+- aiofiles             Apache-2.0
+- filelock             MIT
+- rank-bm25            Apache-2.0
+- stamina              MIT
+- unidecode            GPL-2.0-or-later  (copyleft; installed as a transitive
+                       dependency of edgartools)
+
+The complete resolved dependency set and exact versions are recorded in
+`uv.lock`; each package's full license text ships in its distribution.
+
+--------------------------------------------------------------------------------
+Bundled native libraries
+--------------------------------------------------------------------------------
+Some Python wheels bundle precompiled native libraries:
+
+- numpy wheels bundle OpenBLAS (BSD-3-Clause), LAPACK (BSD-3-Clause),
+  libquadmath (LGPL-2.1-or-later, linked dynamically), and libgfortran (GPL-3.0
+  WITH the GCC Runtime Library Exception, linked dynamically). The GCC Runtime
+  Library Exception explicitly permits redistributing the linked binaries in
+  non-GPL (including proprietary) software, so libgfortran imposes no copyleft
+  obligation; libquadmath is likewise dynamically linked under the LGPL. Applies
+  because numpy is installed.
+- pyarrow bundles Apache Arrow C++ (Apache-2.0).
+- lxml bundles libxml2 and libxslt (MIT), by Daniel Veillard / the GNOME project.
+- duckdb bundles the DuckDB engine (C++, MIT).
+- certifi bundles the Mozilla CA certificate bundle (MPL-2.0).
+
+--------------------------------------------------------------------------------
+Development dependencies (not shipped to end users)
+--------------------------------------------------------------------------------
+The `dev` extra installs development tools only -- pytest, pytest-asyncio,
+pytest-mock, responses, ruff, mypy, pip-audit, build, twine -- which are not
+part of the distributed package. The `schema` extra installs pydantic and
+tomli-w (both already listed above).
+
+===== End of NOTICE =====
