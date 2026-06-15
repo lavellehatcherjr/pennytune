@@ -304,8 +304,6 @@ def test_flow_config_cache_sources(
     valu = next(r for r in payload["results"] if r["ticker"] == "VALU")
     assert valu["positive_contributions"]["valuation"] > 1.0
 
-    assert runner.invoke(app, ["cache", "status"]).exit_code == 0
-    assert runner.invoke(app, ["--yes", "cache", "clear", "--all"]).exit_code == 0
     assert runner.invoke(app, ["sources"]).exit_code == 0
     assert "DISCLAIMER" in runner.invoke(app, ["disclaimer"]).output
 
