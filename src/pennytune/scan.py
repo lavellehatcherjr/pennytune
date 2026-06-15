@@ -2,18 +2,17 @@
 
 Wires every feature into the complete funnel:
 
-* **Universe.** Built upstream by :func:`universe.build_universe` from
-  the SEC listed-company file (NYSE/NASDAQ only, never OTC) and passed in here as
-  the candidate list. There is no price/size filtering.
+* **Candidate set.** A curated list of tickers (named explicitly or read from
+  the watchlist) is passed in here. PennyTune ranks the names you choose; there
+  is no whole-universe build and no price/size filtering.
 * **Gather evidence.** An injected :class:`EvidenceProvider` yields a
   :class:`RawEvidence` bundle per survivor (fundamentals periods, dilution
-  inputs, 8-K event tape, news tone, insider transactions, fails-to-deliver
+  inputs, 8-K event tape, insider transactions, fails-to-deliver
   settlement-stress context, SEC trading-suspension status). One ticker failing
   never aborts the scan; a provider being down degrades to flagged,
   lower-completeness evidence rather than failing.
-* **Compute every signal.** The pure fundamentals, dilution-risk,
-  news, manipulation, delisting, suspension, insider, and forensic
-  scoring functions run over the evidence;
+* **Compute every signal.** The pure fundamentals, dilution-risk, delisting,
+  suspension, insider, and forensic scoring functions run over the evidence;
   valuation/growth/fundamental-momentum/financial-health are scored as
   **sector- and size-relative percentiles**, never absolute cutoffs. (No price
   technicals - no price history is fetched or used beyond the snapshot.)
