@@ -179,7 +179,7 @@ class RawEvidence:
     event_tape: EventTape | None = None
     sentiment_compound: float | None = None
     news_available: bool = True
-    gdelt_used: bool = False  # coverage came (partly) from GDELT → must attribute
+    gdelt_used: bool = False  # retained inert (no news source feeds it now)
     ftd: FtdContext | None = None
     completeness: list[str] = field(default_factory=list)
 
@@ -264,8 +264,8 @@ class ScanReport:
     completeness_flags: dict[str, list[str]] = field(default_factory=dict)
     watchlist_alerts: list[str] = field(default_factory=list)
     guardrails: tuple[str, ...] = ()
-    # Mandatory source attributions to ship in output AND exports: GDELT
-    # attribution is required whenever any result used GDELT-derived coverage.
+    # Source attributions to ship in output AND exports (currently always
+    # empty; retained for the export path).
     attributions: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=lambda: [UNIVERSE_NOTE])
 
