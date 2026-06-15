@@ -1,0 +1,87 @@
+name: CI
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  test:
+    name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev,schema]"
+      - run: python -m pytest tests/ -v
+
+  lint:
+    name: Lint (ruff) + Types (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: 'pip'
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev,schema]"
+      - run: ruff check .
+      - run: python -m mypy
+
+  security:
+    name: Security (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: 'pip'
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev,schema]"
+      - run: pip-audit
+
+  # Validates the PyPI distribution (NOT the frozen binary): builds the wheel +
+  # sdist, checks the metadata and README long-description rendering, then
+  # installs the BUILT WHEEL in a clean venv and smoke-tests the entry point.
+  # Catches missing-files-in-wheel / wrong entry point / import errors that the
+  # editable source checkout would hide. Validation only — never publishes.
+  build-check:
+    name: Build check (wheel + sdist + clean install)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: 'pip'
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev,schema]"
+      - name: Build wheel + sdist
+        run: python -m build
+      - name: Check metadata + README rendering
+        run: python -m twine check dist/*
+      - name: Install the built wheel in a clean venv and smoke-test
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/python -m pip install --upgrade pip
+          /tmp/smoke/bin/pip install dist/*.whl
+          /tmp/smoke/bin/pennytune --version
+          /tmp/smoke/bin/pennytune --help
+          /tmp/smoke/bin/pennytune disclaimer
