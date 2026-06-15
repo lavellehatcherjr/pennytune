@@ -122,7 +122,21 @@ invalid or unenforceable, that provision shall be limited or eliminated
 to the minimum extent necessary, and the remaining provisions shall
 remain in full force and effect.
 
-12. ACCEPTANCE. By installing, accessing, or using PennyTune, you
+12. NOT AFFILIATED WITH OR ENDORSED BY ANY REGULATOR. PennyTune is not
+sponsored by, endorsed by, approved by, reviewed by, or affiliated with
+the U.S. Securities and Exchange Commission (SEC), FINRA, the operators
+of EDGAR, or any other government agency, regulator, or securities
+exchange. References to "SEC," "EDGAR," and "SEC filings" identify only
+the public data sources used and do not imply any endorsement,
+partnership, or official status. No regulator sponsors, endorses,
+reviews, or verifies PennyTune or its output.
+
+13. INDEPENDENT PERSONAL PROJECT. PennyTune is a personal, independent,
+open-source project. It is not a professional, advisory, or regulated
+service, and nothing in it or its output constitutes professional or
+regulated financial advice.
+
+14. ACCEPTANCE. By installing, accessing, or using PennyTune, you
 acknowledge that you have read, understood, and agree to this entire
 disclaimer, and that you use the software entirely at your own risk. If
 you do not agree, do not install or use the software.
@@ -393,7 +407,21 @@ invalid or unenforceable, that provision shall be limited or eliminated
 to the minimum extent necessary, and the remaining provisions shall
 remain in full force and effect.
 
-12. ACCEPTANCE. By installing, accessing, or using PennyTune, you
+12. NOT AFFILIATED WITH OR ENDORSED BY ANY REGULATOR. PennyTune is not
+sponsored by, endorsed by, approved by, reviewed by, or affiliated with
+the U.S. Securities and Exchange Commission (SEC), FINRA, the operators
+of EDGAR, or any other government agency, regulator, or securities
+exchange. References to "SEC," "EDGAR," and "SEC filings" identify only
+the public data sources used and do not imply any endorsement,
+partnership, or official status. No regulator sponsors, endorses,
+reviews, or verifies PennyTune or its output.
+
+13. INDEPENDENT PERSONAL PROJECT. PennyTune is a personal, independent,
+open-source project. It is not a professional, advisory, or regulated
+service, and nothing in it or its output constitutes professional or
+regulated financial advice.
+
+14. ACCEPTANCE. By installing, accessing, or using PennyTune, you
 acknowledge that you have read, understood, and agree to this entire
 disclaimer, and that you use the software entirely at your own risk. If
 you do not agree, do not install or use the software.
