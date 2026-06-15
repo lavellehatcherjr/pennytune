@@ -68,8 +68,8 @@ def to_json(result: RankedResult, *, attributions: Sequence[str] = ()) -> str:
     """Clean machine-readable JSON for ``--json`` (no banner/decoration).
 
     Contains no secrets (results hold no identity/credentials). The one-line
-    disclaimer travels as ``_disclaimer``; mandatory source credits (e.g. the
-    mandatory GDELT attribution) travel as ``_attributions``.
+    disclaimer travels as ``_disclaimer``; any source attributions travel as
+    ``_attributions`` (currently none).
     """
     payload: dict[str, Any] = {
         "_disclaimer": EXPORT_HEADER,
@@ -175,10 +175,9 @@ def export(
 ) -> Path:
     """Export the FULL ranked set with the one-line disclaimer header.
 
-    Mandatory source credits (``attributions`` - e.g. the mandatory GDELT
-    attribution when a result used GDELT coverage) travel inside every format: a
-    comment line in CSV/Markdown, ``_attributions`` in JSON, schema metadata in
-    Parquet.
+    Any source attributions (``attributions`` - currently always empty) travel
+    inside every format: a comment line in CSV/Markdown, ``_attributions`` in
+    JSON, schema metadata in Parquet.
     """
     records = result_to_records(result)
     path.parent.mkdir(parents=True, exist_ok=True)
