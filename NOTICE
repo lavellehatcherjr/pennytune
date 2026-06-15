@@ -25,7 +25,6 @@ Runtime dependencies
 - duckdb               MIT              DuckDB Foundation
 - pyarrow              Apache-2.0       Apache Arrow Developers
 - edgartools           MIT              Dwight Gunning
-- vaderSentiment       MIT              C.J. Hutto
 - typer                MIT              Sebastian Ramirez
 - rich                 MIT              Will McGugan
 - pyfiglet             MIT              Peter Waller and contributors
