@@ -37,7 +37,7 @@ def test_disclaimer_constants_present() -> None:
     # Full disclaimer must carry the header and the final acceptance clause
     # verbatim and must not be abridged.
     assert FULL_DISCLAIMER.startswith("DISCLAIMER — PLEASE READ CAREFULLY")
-    assert "12. ACCEPTANCE." in FULL_DISCLAIMER
+    assert "14. ACCEPTANCE." in FULL_DISCLAIMER
     assert FULL_DISCLAIMER.strip().endswith("do not install or use the software.")
     # All 12 numbered sections present.
     for n in range(1, 13):
