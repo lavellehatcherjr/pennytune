@@ -12,11 +12,11 @@ data-freshness header, the watchlist banner, the ranked table, and exporting
 the full set; ``inspect`` renders one ticker's decomposed score. The universe
 degrades to a valid empty result on outage/offline (graceful
 degradation when offline); the evidence provider is injectable -
-all eight evidence categories are fetched live - fundamentals, dilution, SIC,
-insider, 8-K events, trading-suspensions and fails-to-deliver from EDGAR
+all evidence categories are fetched live from SEC EDGAR - fundamentals,
+dilution, SIC, insider, 8-K events, trading-suspensions and fails-to-deliver
 (companyfacts + submissions + full-text + Form 4/5 XML + the suspension list +
-the FTD bulk file), and news/coverage from GDELT (keyless) over the EDGAR filing
-spine - while ``--offline`` falls back to the degrading provider entirely.
+the FTD bulk file) - while ``--offline`` falls back to the degrading provider
+entirely.
 
 Note: ``from __future__ import annotations`` is intentionally NOT used (Typer
 resolves parameter hints at runtime; concrete ``Annotated[...]`` is most robust).
@@ -64,11 +64,6 @@ from pennytune.features.fundamentals import (
 )
 from pennytune.features.halts import EdgarSuspensionProvider
 from pennytune.features.insider import EdgarInsiderProvider
-from pennytune.features.news import (
-    GDELT_ATTRIBUTION,
-    CoverageEvidence,
-    GdeltNewsProvider,
-)
 from pennytune.features.short_interest import EdgarFtdProvider, FtdEvidence
 from pennytune.features.universe import (
     SEC_UNIVERSE_URL,
@@ -151,7 +146,6 @@ _CORE_DEPENDENCIES: tuple[str, ...] = (
     "tenacity",
     "defusedxml",
     "requests",
-    "httpx",
 )
 
 # Provider table for `sources` (all no-key, per the data-source policy).
@@ -169,13 +163,6 @@ _SOURCES: tuple[dict[str, str], ...] = (
         "key": "n/a",
         "limit": "twice-monthly / as-published",
         "domains": "sec.gov",
-    },
-    {
-        "source": "GDELT",
-        "role": "news / coverage",
-        "key": "n/a",
-        "limit": "keyless, ~15-min",
-        "domains": "api.gdeltproject.org",
     },
 )
 
@@ -446,7 +433,7 @@ def init(
 
 # ---- scan pipeline wiring --------------------------------------------------
 
-_SORT_CHOICES = ("score", "growth", "valuation", "sentiment", "risk")
+_SORT_CHOICES = ("score", "growth", "valuation", "risk")
 _EXPORT_EXT = {"csv": "csv", "parquet": "parquet", "json": "json", "markdown": "md"}
 
 
@@ -460,47 +447,11 @@ class _DegradingEvidenceProvider:
 
     reason = (
         "offline — no live data fetched; "
-        "run without --offline for live SEC and GDELT data"
+        "run without --offline for live SEC data"
     )
 
     def gather(self, candidate: UniverseCandidate) -> scan_mod.RawEvidence:
         return scan_mod.degraded_evidence(candidate, self.reason)
-
-
-def _coverage_note(coverage: CoverageEvidence) -> str | None:
-    """Surface news coverage as characterization EVIDENCE (never a forecast).
-
-    Sentiment is one modest input; the decision-grade items are the GDELT theme
-    tags, promotional skew and catalysts, surfaced here as context. The mandatory
-    GDELT attribution travels both here and in the report-level attributions.
-    """
-    profile = coverage.profile
-    if profile is None:
-        return None
-    parts: list[str] = []
-    if profile.gdelt is not None:
-        parts.append(f"{profile.gdelt.article_count} GDELT article(s)")
-        if profile.gdelt.theme_tags:
-            parts.append("themes: " + ", ".join(profile.gdelt.theme_tags))
-        if (profile.gdelt.promotional_skew or 0.0) >= 0.5:
-            parts.append("promotional-domain skew")
-    if profile.tone.count:
-        parts.append(
-            f"tone {profile.tone.net_label} (mean {profile.tone.mean_compound:+.2f})"
-        )
-    if profile.catalysts:
-        parts.append(
-            "catalysts: " + ", ".join(sorted({c.kind for c in profile.catalysts}))
-        )
-    for flag in ("GOING-CONCERN", "MATERIAL-WEAKNESS", "PROMOTIONAL-COVERAGE"):
-        if flag in profile.flags:
-            parts.append(flag)
-    if not parts:
-        return None
-    note = "coverage characterization (evidence, not a forecast): " + "; ".join(parts)
-    if profile.attribution:
-        note += f" | {profile.attribution}"
-    return note
 
 
 def _ftd_context_note(ftd: FtdEvidence) -> str | None:
@@ -557,14 +508,10 @@ class _LiveEvidenceProvider:
     double-counted). The SEC trading-suspension list (one cached fetch) gates an
     active/recent suspension (matched by company name); the bi-monthly
     fails-to-deliver bulk file (one cached fetch) adds settlement-stress context
-    (matched by symbol, never scored); GDELT adds news/coverage breadth (one
-    keyless 429-retried call per ticker, parsed structurally) on top of the EDGAR
-    filing spine (the reused event tape) — sentiment is a modest input, never a
-    gate, and ``gdelt_used`` carries the GDELT attribution. This is the complete
-    eight-category evidence. Suppress-not-impute: a missing CIK or
-    unavailable companyfacts degrades the name honestly; a submissions / EFTS /
-    Form-4 / suspension-list / FTD-file / GDELT failure degrades only its slice;
-    no coverage is clean, never penalized.
+    (matched by symbol, never scored). This is the complete SEC-EDGAR evidence.
+    Suppress-not-impute: a missing CIK or unavailable companyfacts degrades the
+    name honestly; a submissions / EFTS / Form-4 / suspension-list / FTD-file
+    failure degrades only its slice.
     """
 
     def __init__(
@@ -574,7 +521,6 @@ class _LiveEvidenceProvider:
         insider: EdgarInsiderProvider,
         suspensions: EdgarSuspensionProvider,
         ftd: EdgarFtdProvider,
-        news: GdeltNewsProvider,
         client: SafeHttpClient,
     ) -> None:
         self._fundamentals = fundamentals
@@ -582,7 +528,6 @@ class _LiveEvidenceProvider:
         self._insider = insider
         self._suspensions = suspensions
         self._ftd = ftd
-        self._news = news
         self._client = client
         self._ticker_cik: dict[str, EdgarListing] | None = None
 
@@ -656,20 +601,12 @@ class _LiveEvidenceProvider:
         # file, matched by symbol. Never gated or scored; "no fails" is clean
         # (not degraded); an unfetchable file is degraded and flagged.
         ftd = self._ftd.get_ftd_evidence(candidate.ticker, now=now)
-        # News / coverage characterization: GDELT breadth (keyless; 429-retried
-        # by the client) + the EDGAR filing spine (the already-fetched event
-        # tape). Sentiment is a modest contributor, never a gate; no coverage is
-        # clean (not negative); gdelt_used makes the GDELT attribution travel.
-        coverage = self._news.get_coverage_evidence(
-            candidate.ticker, company_name, event_tape=event_tape, now=now
-        )
         completeness = [
             *fundamentals.completeness,
             *dilution.completeness,
             *insider.completeness,
             *halt.completeness,
             *ftd.completeness,
-            *coverage.completeness,
         ]
         red_flags = _red_flag_8k_note(event_tape) if event_tape is not None else None
         if red_flags is not None:
@@ -677,9 +614,6 @@ class _LiveEvidenceProvider:
         ftd_note = _ftd_context_note(ftd)
         if ftd_note is not None:
             completeness.append(ftd_note)
-        coverage_note = _coverage_note(coverage)
-        if coverage_note is not None:
-            completeness.append(coverage_note)
         return scan_mod.RawEvidence(
             ticker=candidate.ticker,
             sic_code=dilution.sic_code,
@@ -697,9 +631,6 @@ class _LiveEvidenceProvider:
             event_tape=event_tape,
             halt=halt.halt,
             ftd=ftd.ftd,
-            sentiment_compound=coverage.sentiment_compound,
-            news_available=coverage.news_available,
-            gdelt_used=coverage.gdelt_used,
             completeness=completeness,
         )
 
@@ -712,19 +643,15 @@ def _make_evidence_provider(
 ) -> scan_mod.EvidenceProvider:
     """Build the evidence provider (overridable in tests).
 
-    Online with a configured identity: ALL EIGHT evidence categories come from
-    LIVE data — fundamentals, dilution, SIC, insider, 8-K events,
-    trading-suspensions, fails-to-deliver (EDGAR) and news/coverage (GDELT +
-    the EDGAR filing spine). Offline — or before an EDGAR identity is set — the
-    degrading default, which makes no network calls.
+    Online with a configured identity: all evidence categories come from LIVE
+    SEC EDGAR data — fundamentals, dilution, SIC, insider, 8-K events,
+    trading-suspensions, and fails-to-deliver. Offline — or before an EDGAR
+    identity is set — the degrading default, which makes no network calls.
     """
     if state.offline or not cfg.edgar_identity:
         return _DegradingEvidenceProvider()
-    limiter = RateLimiter(
-        {"edgar": cfg.rate_limits.edgar_rps, "gdelt": cfg.rate_limits.gdelt_rps}
-    )
-    # The configured EDGAR identity IS the SEC-required User-Agent on the wire;
-    # GDELT is keyless (its own polite rate-limit bucket + 429 backoff).
+    limiter = RateLimiter({"edgar": cfg.rate_limits.edgar_rps})
+    # The configured EDGAR identity IS the SEC-required User-Agent on the wire.
     client = SafeHttpClient(limiter=limiter, user_agent=cfg.edgar_identity)
     return _LiveEvidenceProvider(
         EdgarFundamentalsProvider(client),
@@ -732,7 +659,6 @@ def _make_evidence_provider(
         EdgarInsiderProvider(client),
         EdgarSuspensionProvider(client),
         EdgarFtdProvider(client),
-        GdeltNewsProvider(client),
         client,
     )
 
@@ -812,7 +738,7 @@ def _load_universe(
     policy = CachePolicy(offline=state.offline, refresh=state.refresh)
     store = Cache()
     rl = cfg.rate_limits
-    limiter = RateLimiter({"edgar": rl.edgar_rps, "gdelt": rl.gdelt_rps})
+    limiter = RateLimiter({"edgar": rl.edgar_rps})
     identity = cfg.edgar_identity or "PennyTune research tool"
     client = SafeHttpClient(limiter=limiter, user_agent=identity)
 
@@ -865,12 +791,9 @@ def _universe_header(report: ScanReport) -> str:
     bits = [f"preset={report.preset_name}", f"profile={report.profile_name}"]
     counts = report.universe_counts
     if counts:
-        bits.append(
-            f"{counts.get('listed', '?')} listed -> {counts.get('selected', '?')} "
-            "selected"
-        )
-    cache = " (cache-only)" if report.universe_from_cache else ""
-    return "Universe  " + "  ".join(bits) + cache
+        selected = counts.get("selected", "?")
+        bits.append(f"{selected} ticker(s)")
+    return "Scan set  " + "  ".join(bits)
 
 
 def _render_scan(
@@ -956,18 +879,56 @@ def _maybe_export(
         typer.echo(f"Wrote {written}")
 
 
+_MAX_SCAN_TICKERS = 100
+
+
+def _curated_candidates(tickers: list[str] | None) -> list[UniverseCandidate]:
+    """Resolve scan's candidate set from explicit tickers or the watchlist.
+
+    PennyTune does NOT scan the whole ~7,500-name SEC-listed universe (an egress
+    hazard, and meaningless without price data): scan ranks the names you choose,
+    capped at 100 to stay polite to SEC EDGAR.
+    """
+    if tickers:
+        symbols = [t.strip().upper() for t in tickers if t.strip()]
+    else:
+        wl = _open_watchlist()
+        symbols = [t for t, _ in wl.list_tickers()] if wl is not None else []
+        if wl is not None:
+            wl.close()
+        if not symbols:
+            typer.echo(
+                "No tickers given and the watchlist is empty. Pass tickers "
+                "(pennytune scan AAA BBB) or add some with `pennytune watch add`.",
+                err=True,
+            )
+            raise typer.Exit(code=int(ExitCode.USAGE_ERROR))
+    deduped = list(dict.fromkeys(symbols))  # preserve order, drop duplicates
+    if len(deduped) > _MAX_SCAN_TICKERS:
+        typer.echo(
+            f"Refusing to scan {len(deduped)} tickers (max {_MAX_SCAN_TICKERS}); "
+            "trim the list to stay polite to SEC EDGAR.",
+            err=True,
+        )
+        raise typer.Exit(code=int(ExitCode.USAGE_ERROR))
+    return [UniverseCandidate(ticker=s, name=s) for s in deduped]
+
+
 @app.command()
 def scan(
     ctx: typer.Context,
+    tickers: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help="Tickers to rank (e.g. `scan AAA BBB`); omit to rank your watchlist."
+        ),
+    ] = None,
     preset: Annotated[
         str | None,
         typer.Option(
             "--preset",
-            help="Universe preset (penny|micro|small-cap-value|broad|custom).",
+            help="Risk-weighting preset (penny|micro|small-cap-value|broad|custom).",
         ),
-    ] = None,
-    exchange: Annotated[
-        str | None, typer.Option("--exchange", help="nyse | nasdaq | all.")
     ] = None,
     exclude_flagged: Annotated[
         bool, typer.Option("--exclude-flagged", help="Drop names with critical flags.")
@@ -985,14 +946,14 @@ def scan(
         ),
     ] = False,
     no_news: Annotated[
-        bool, typer.Option("--no-news", help="Skip news/sentiment (faster).")
+        bool, typer.Option("--no-news", help="Suppress the sentiment sub-score.")
     ] = False,
     top: Annotated[
-        int, typer.Option("--top", help="How many recommendations to return.")
+        int, typer.Option("--top", help="How many ranked names to display.")
     ] = 10,
     sort: Annotated[
         str,
-        typer.Option("--sort", help="score|growth|valuation|sentiment|risk."),
+        typer.Option("--sort", help="score|growth|valuation|risk."),
     ] = "score",
     export_format: Annotated[
         str | None,
@@ -1001,36 +962,40 @@ def scan(
         ),
     ] = None,
 ) -> None:
-    """Run the quality-based screen over the SEC universe and rank the results."""
+    """Rank a curated set of tickers by their SEC-filing risk signals.
+
+    Pass tickers (``pennytune scan AAA BBB``) or omit them to rank your
+    watchlist; at most 100 per run. PennyTune fetches no live prices and never
+    scans the whole market - it ranks the names YOU choose. The positive quality
+    sub-scores are sector/size-relative percentiles (meaningful only across a
+    large cross-section), so on a small curated set the ranking is driven mainly
+    by the risk/penalty signals (dilution, distress, delisting, insider selling)
+    - it surfaces the riskiest names in your set.
+    """
     state = _state(ctx)
     cfg = _require_ready(ctx)
-    request, filters, preset_name = _resolve_scan_config(
+    candidates = _curated_candidates(tickers)
+    request = _resolve_scan_config(
         cfg,
         state,
         preset=preset,
-        exchange=exchange,
         top=top,
         sort=sort,
         exclude_flagged=exclude_flagged,
         exclude_serial_splitter=exclude_serial_splitter,
         require_insider_buying=require_insider_buying,
         no_news=no_news,
-    )
-    universe, freshness, degraded_note = _load_universe(
-        cfg, filters, preset_name, state
-    )
+    )[0]
     provider = _make_evidence_provider(cfg, state)
     watchlist = _open_watchlist()
     try:
         report = run_scan(
-            universe.candidates,
+            candidates,
             provider,
             request,
-            universe_counts=universe.counts,
-            freshness=freshness,
+            universe_counts={"selected": len(candidates)},
             watchlist=watchlist,
-            universe_from_cache=universe.from_cache,
-            universe_notes=universe.notes,
+            universe_notes=[],
         )
     finally:
         if watchlist is not None:
@@ -1038,9 +1003,9 @@ def scan(
         _close_provider(provider)
 
     if state.json_output:
-        typer.echo(_scan_json(report, degraded_note))
+        typer.echo(_scan_json(report, None))
         return
-    _render_scan(report, state, degraded_note)
+    _render_scan(report, state, None)
     _maybe_export(report, cfg, state, export_format)
     if report.partial_failure:
         typer.echo(
@@ -1128,11 +1093,7 @@ def sources(ctx: typer.Context) -> None:
     """Show data sources, free-tier limits, and which domains are contacted."""
     state = _state(ctx)
     if state.json_output:
-        typer.echo(
-            json.dumps(
-                {"sources": list(_SOURCES), "attribution": GDELT_ATTRIBUTION}, indent=2
-            )
-        )
+        typer.echo(json.dumps({"sources": list(_SOURCES)}, indent=2))
         return
     for src in _SOURCES:
         typer.echo(
@@ -1142,14 +1103,12 @@ def sources(ctx: typer.Context) -> None:
     typer.echo("")
     typer.echo(
         "Sources are no-key and PennyTune uses no API keys: SEC data is U.S. "
-        "government public domain; GDELT is redistributable with the required "
-        "attribution (below)."
+        "government public domain."
     )
     typer.echo(
         "No live prices are fetched (no technicals/spread); intraday "
         "trading-halt status is not evaluated — verify it in your broker."
     )
-    typer.echo(GDELT_ATTRIBUTION)
 
 
 # ---- cache ------------------------------------------------------------------
