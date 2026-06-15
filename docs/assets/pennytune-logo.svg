@@ -1,0 +1,7 @@
+<svg width="600" height="180" viewBox="0 0 600 180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="PennyTune">
+  <rect x="0" y="0" width="600" height="180" rx="14" fill="#FBFAF7" stroke="#E6E2D8" stroke-width="1"/>
+  <text x="300" y="96" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="56" font-weight="700">
+    <tspan fill="#1A1C20">Penny</tspan><tspan fill="#B8901E">Tune</tspan>
+  </text>
+  <text x="300" y="130" text-anchor="middle" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#9b8b5e" letter-spacing="0.32em">TUNE OUT THE NOISE</text>
+</svg>
