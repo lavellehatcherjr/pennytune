@@ -67,7 +67,7 @@ def test_cascade_empty_raises() -> None:
 def test_host_allowed() -> None:
     assert host_allowed("data.sec.gov")
     assert host_allowed("efts.sec.gov")
-    assert host_allowed("api.gdeltproject.org")
+    assert not host_allowed("api.gdeltproject.org")  # news/GDELT removed → SEC-only
     assert not host_allowed("evil.example.com")
     assert not host_allowed(None)
 
