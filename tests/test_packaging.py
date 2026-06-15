@@ -72,7 +72,7 @@ def test_module_entrypoint_scan_offline(tmp_path: Path) -> None:
     )
     assert init.returncode == 0, init.stderr
     scan = subprocess.run(
-        _module("--offline", "scan"),
+        _module("--offline", "scan", "AAA"),
         capture_output=True,
         text=True,
         encoding="utf-8",
