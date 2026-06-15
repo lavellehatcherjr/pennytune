@@ -64,7 +64,7 @@ representation is made that any account will or is likely to achieve
 profits or losses similar to any analysis, backtest, or example shown.
 
 6. THIRD-PARTY DATA "AS IS." All data is obtained from third-party and
-public sources (including SEC EDGAR, GDELT, and other public sources)
+public sources (including SEC EDGAR and other public sources)
 and is provided "AS IS." Such data may be inaccurate,
 incomplete, delayed, out of date, or wrong. The author does not create,
 endorse, verify, or guarantee any third-party data and makes no
