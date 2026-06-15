@@ -21,7 +21,7 @@ Only the latest released version receives security updates.
 ## Security Model
 
 PennyTune is a local command-line tool that fetches public data from SEC EDGAR
-and GDELT. Its security posture:
+(its only data source). Its security posture:
 
 - **No API keys, accounts, or secrets.** PennyTune uses no API keys and requires
   no account anywhere, and has no secret store or keyring — there are no
@@ -32,9 +32,9 @@ and GDELT. Its security posture:
   email is masked in `config get` / `config set` output (e.g. `Name
   <d***@domain>`).
 - **HTTPS-only, allow-listed network access.** The tool connects only to SEC
-  EDGAR and GDELT, over HTTPS; non-HTTPS and off-allow-list requests are
-  rejected. The egress allow-list is `sec.gov` and `gdeltproject.org` — nothing
-  else.
+  EDGAR, over HTTPS; non-HTTPS and off-allow-list requests are rejected. The
+  egress allow-list is `sec.gov` — and nothing else (SEC EDGAR is the sole
+  data source).
 - **No telemetry.** PennyTune does not phone home and sends no analytics or usage
   data.
 - **Defensive parsing.** SEC XML is parsed with `defusedxml`; the standard-library
@@ -47,18 +47,18 @@ and GDELT. Its security posture:
   than 10 requests/second; the tool enforces this).
 - **Enforced in CI.** These properties are asserted by an automated
   security-invariants test suite that runs on every change — no forbidden
-  imports, no `eval` / `exec` / `os.system`, HTTPS-only egress to the two
-  documented domains, no secret-bearing config fields, and the presence of the
-  legal disclaimer and the required source attributions.
+  imports, no `eval` / `exec` / `os.system`, HTTPS-only egress to the single
+  documented domain (SEC EDGAR), no secret-bearing config fields, and the
+  presence of the legal disclaimer.
 
 ## Known Limitations
 
 - **Data sent to the SEC.** To access SEC EDGAR, PennyTune sends your contact
   identity (name + email) to the SEC in the request `User-Agent`, as the SEC's
-  fair-access policy requires. GDELT requests use a generic, keyless
-  `User-Agent`, so your email is sent **only** to the SEC.
+  fair-access policy requires. SEC EDGAR is the only network destination, so
+  your email is sent **only** to the SEC.
 - **Third-party public data, as is.** All analysis data comes from third-party
-  public sources (SEC EDGAR, GDELT) and is provided "as is"; PennyTune does not
+  public sources (SEC EDGAR) and is provided "as is"; PennyTune does not
   control those services' availability or the accuracy of their data. The full
   disclaimer (`pennytune disclaimer`) covers data caveats — PennyTune surfaces
   evidence for your own due diligence and is not investment advice.
