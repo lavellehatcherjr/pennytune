@@ -1,19 +1,13 @@
-"""Local cache: DuckDB + Parquet with per-domain TTLs.
+"""Local cache: DuckDB + Parquet dataset round-trip.
 
-Cached payloads (raw bytes) and tabular datasets (Parquet) are keyed by
-``(domain, key)`` with a ``fetched_at`` stamp; freshness is judged against a
-per-domain TTL supplied by the caller (from ``config.CacheTTL``). The
-``--offline`` (cache only) and ``--refresh`` (ignore TTLs) flags are honored via
-:class:`CachePolicy` and :func:`cached_fetch`.
-
-Timestamps are stored as naive UTC to avoid DuckDB timezone ambiguity. There is
-no EOD/OHLCV price cache - the tool keeps only a short-TTL *current price*
-snapshot.
+Tabular datasets are stored as Parquet keyed by ``(domain, key)`` with a
+``fetched_at`` stamp; freshness is judged against a per-domain TTL supplied by
+the caller. Timestamps are stored as naive UTC to avoid DuckDB timezone
+ambiguity.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,10 +22,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CacheEntry",
-    "CachePolicy",
-    "OfflineCacheMissError",
     "Cache",
-    "cached_fetch",
 ]
 
 
@@ -57,20 +48,8 @@ class CacheEntry:
     fetched_at: datetime
 
 
-class OfflineCacheMissError(Exception):
-    """Raised when ``--offline`` is set but the item is not cached (→ exit 4)."""
-
-
-@dataclass
-class CachePolicy:
-    """Read/write policy derived from the ``--offline`` / ``--refresh`` flags."""
-
-    offline: bool = False
-    refresh: bool = False
-
-
 class Cache:
-    """DuckDB-backed cache for byte payloads and Parquet datasets."""
+    """DuckDB-backed cache for Parquet datasets."""
 
     def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = db_path or (paths.cache_dir() / "cache.duckdb")
@@ -133,15 +112,6 @@ class Cache:
             fetched_at=row[5],
         )
 
-    def get(
-        self, domain: str, key: str, ttl_seconds: float, *, now: datetime | None = None
-    ) -> bytes | None:
-        """Return the cached payload if present and fresh, else None."""
-        entry = self.get_entry(domain, key)
-        if entry is None or not self.is_fresh(entry.fetched_at, ttl_seconds, now=now):
-            return None
-        return entry.payload
-
     def put_dataframe(
         self,
         domain: str,
@@ -178,72 +148,9 @@ class Cache:
 
         return pd.read_parquet(parquet_path)
 
-    def clear(self, domain: str | None = None) -> int:
-        """Delete cache entries (all, or just one domain). Returns count removed."""
-        if domain is None:
-            count = self._conn.execute("SELECT count(*) FROM cache_entries").fetchone()
-            self._conn.execute("DELETE FROM cache_entries")
-        else:
-            count = self._conn.execute(
-                "SELECT count(*) FROM cache_entries WHERE domain = ?", [domain]
-            ).fetchone()
-            self._conn.execute("DELETE FROM cache_entries WHERE domain = ?", [domain])
-        return int(count[0]) if count is not None else 0
-
-    def domain_counts(self) -> dict[str, int]:
-        """Cached-entry counts per domain (for the ``cache status`` screen)."""
-        rows = self._conn.execute(
-            "SELECT domain, count(*) FROM cache_entries GROUP BY domain ORDER BY domain"
-        ).fetchall()
-        return {row[0]: int(row[1]) for row in rows}
-
     def close(self) -> None:
         self._conn.close()
 
     def _parquet_path(self, domain: str, key: str) -> Path:
         safe_key = "".join(ch if (ch.isalnum() or ch in "-_.") else "_" for ch in key)
         return self.db_path.parent / "parquet" / domain / f"{safe_key}.parquet"
-
-
-def cached_fetch(
-    cache: Cache,
-    domain: str,
-    key: str,
-    ttl_seconds: float,
-    fetch_fn: Callable[[], bytes],
-    policy: CachePolicy,
-    *,
-    content_type: str = "application/octet-stream",
-    source_url: str = "",
-    now: datetime | None = None,
-) -> bytes:
-    """Return cached bytes if fresh; otherwise fetch, store, and return.
-
-    ``--refresh`` skips the freshness read and forces a fetch. ``--offline``
-    never calls the network: it returns the cached payload (even if stale, so
-    the caller can label its age) and raises :class:`OfflineCacheMissError`
-    if nothing is cached.
-    """
-    if not policy.refresh:
-        fresh = cache.get(domain, key, ttl_seconds, now=now)
-        if fresh is not None:
-            return fresh
-
-    if policy.offline:
-        entry = cache.get_entry(domain, key)
-        if entry is not None:
-            return entry.payload
-        raise OfflineCacheMissError(
-            f"{domain}/{key} is not cached and --offline is set"
-        )
-
-    payload = fetch_fn()
-    cache.put(
-        domain,
-        key,
-        payload,
-        content_type=content_type,
-        source_url=source_url,
-        fetched_at=now,
-    )
-    return payload
