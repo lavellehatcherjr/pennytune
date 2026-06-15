@@ -31,8 +31,7 @@ __all__ = ["SafeHttpClient", "ALLOWED_DOMAIN_SUFFIXES", "host_allowed"]
 
 # Documented data sources only. Subdomains of these are allowed.
 ALLOWED_DOMAIN_SUFFIXES: tuple[str, ...] = (
-    "sec.gov",  # data.sec.gov, efts.sec.gov, www.sec.gov (universe + filings)
-    "gdeltproject.org",  # api.gdeltproject.org (news)
+    "sec.gov",  # data.sec.gov, efts.sec.gov, www.sec.gov (the only data source)
 )
 
 DEFAULT_TIMEOUT = 30.0
