@@ -1,7 +1,7 @@
 """Cross-platform application paths.
 
-All per-OS locations resolve through ``platformdirs`` so config, cache, and
-data land in the correct place on Linux, macOS, and Windows. User-facing scan
+All per-OS locations resolve through ``platformdirs`` so config and data
+land in the correct place on Linux, macOS, and Windows. User-facing scan
 artifacts default to ``./results`` in the working directory (matching the
 output display and the repository ``.gitignore``); this is overridable via
 the ``output_dir`` config setting.
