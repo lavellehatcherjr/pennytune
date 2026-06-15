@@ -210,7 +210,7 @@ def test_flow_watchlist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     assert "VALU" not in runner.invoke(app, ["watch", "list"]).output
 
 
-# ---- Flow 4: export loop (every format, disclaimer header + GDELT credit) ----
+# ---- Flow 4: export loop (every format, disclaimer header) ------------------
 
 
 @pytest.mark.parametrize(
