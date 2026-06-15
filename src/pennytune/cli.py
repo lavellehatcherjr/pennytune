@@ -128,7 +128,6 @@ RISK_FLAG_AFFIRMATION = (
 _CORE_DEPENDENCIES: tuple[str, ...] = (
     "pandas",
     "numpy",
-    "duckdb",
     "pyarrow",
     "edgartools",
     "typer",
