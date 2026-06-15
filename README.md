@@ -10,26 +10,25 @@
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-blue)](https://github.com/lavellehatcherjr/pennytune/actions/workflows/ci.yml)
 
 **PennyTune is a free, open-source, no-API-key forensic due-diligence tool for US-listed micro-caps.**
-Point it at a ticker you already have (or rank the SEC-listed universe by filing
-quality) and it surfaces the risk signals and forensic flags in that company's
-SEC filings - accounting-quality and distress scores, dilution and
-corporate-action risk, insider activity, 8-K material events, delisting-notice
-and active trading-suspension risk, fails-to-deliver settlement context, and
-news-coverage characterization - with **every flag traced to the underlying
-filing**, so you can assess the company yourself.
+Point it at the tickers you already hold or are watching and it surfaces the
+risk signals and forensic flags in each company's SEC filings -
+accounting-quality and distress scores, dilution and corporate-action risk,
+insider activity, 8-K material events, delisting-notice and active
+trading-suspension risk, and fails-to-deliver settlement context - with **every
+flag traced to the underlying filing**, so you can assess the company yourself.
 
-It runs entirely on **public, no-account, no-API-key data sources**: SEC EDGAR
-(the universe and all filings), plus GDELT news and SEC fails-to-deliver /
-trading-suspension feeds for context. There is **no bring-your-own-key option
-anywhere**.
+It runs entirely on **public, no-account, no-API-key data**: SEC EDGAR is the
+single data source (the listed-company universe, all filings, and the
+fails-to-deliver / trading-suspension feeds). There is **no bring-your-own-key
+option anywhere**.
 
 > PennyTune surfaces **evidence for your own due diligence** - it does not tell
 > you whether a stock is "clean" or "a landmine", does not give buy/sell advice,
 > and does not predict outcomes. It analyzes **SEC-registered US-listed
 > companies** and **fetches no live prices**: it does not screen by current
 > price, compute technical indicators, or assess tradeability (bid-ask
-> spread/liquidity). You supply the ticker(s) or use quality-based screening,
-> and verify current price and tradeability yourself in a brokerage.
+> spread/liquidity). You supply the ticker(s) to rank, and verify current price
+> and tradeability yourself in a brokerage.
 
 ---
 
@@ -77,7 +76,7 @@ representation is made that any account will or is likely to achieve
 profits or losses similar to any analysis, backtest, or example shown.
 
 6. THIRD-PARTY DATA "AS IS." All data is obtained from third-party and
-public sources (including SEC EDGAR, GDELT, and other public sources)
+public sources (including SEC EDGAR and other public sources)
 and is provided "AS IS." Such data may be inaccurate,
 incomplete, delayed, out of date, or wrong. The author does not create,
 endorse, verify, or guarantee any third-party data and makes no
@@ -178,31 +177,21 @@ matter most for a micro-cap - every one linked back to the filing behind it:
   as context, not held against the company.
 - **Fails-to-deliver** - settlement-stress context from the SEC's bi-monthly
   fails-to-deliver data (context only - not evidence of manipulation on its own).
-- **News & coverage characterization** - tone, promotional-source skew, and
-  catalyst keywords from news headlines and the SEC filing feed, framed as
-  context. This is the lightest signal - coverage characterization, never a
-  verdict.
 - **Sector classification** - each company's SIC sector, so quality and
   valuation comparisons are made against sector-and-size peers rather than
   absolute cutoffs.
 
 ## Data & attribution
 
-PennyTune uses only public, no-key data sources: **SEC EDGAR** (the universe -
-from the SEC `company_tickers_exchange.json` listed-company file - and all
-filings, fundamentals, and insider forms), plus the **SEC fails-to-deliver /
-trading-suspension files** and **GDELT** news for context. The only identity
-required anywhere is the SEC EDGAR `User-Agent` string (your name + email) - a
-request header the SEC's fair-access policy requires to identify the requester,
-not a PennyTune account, login, or key. It is stored only in your local config
-(redacted in `config get`), sent only in the SEC request header, and never
-transmitted to the author or any third party - GDELT requests use a generic
-keyless User-Agent, so your email reaches only the SEC. Any valid personal email
-works; setup checks the format, not the provider.
-
-> **GDELT attribution (required).** Any use or redistribution of GDELT-derived
-> output must credit *The GDELT Project* (<https://www.gdeltproject.org/>).
-> PennyTune emits this attribution string with any GDELT-derived output.
+PennyTune uses only public, no-key data from a single source: **SEC EDGAR** (the
+universe - from the SEC `company_tickers_exchange.json` listed-company file - and
+all filings, fundamentals, insider forms, and the fails-to-deliver /
+trading-suspension files). The only identity required anywhere is the SEC EDGAR
+`User-Agent` string (your name + email) - a request header the SEC's fair-access
+policy requires to identify the requester, not a PennyTune account, login, or
+key. It is stored only in your local config (redacted in `config get`), sent only
+in the SEC request header, and never transmitted to the author or any third
+party. Any valid personal email works; setup checks the format, not the provider.
 
 PennyTune is a research tool and does **not** republish raw third-party
 datasets; downloaded vendor data and the local cache are never committed.
@@ -254,23 +243,27 @@ pennytune inspect GROW
 pennytune --json inspect GROW | jq '.inspect'   # machine-readable
 ```
 
-`scan` ranks the SEC-listed universe by **filing quality** (no price filtering -
-the tool fetches no prices). Narrow it by listing venue and tune the risk
-weighting and strategy:
+`scan` ranks a **curated set of tickers you choose** - given explicitly or read
+from your watchlist - by their SEC-filing risk signals (no price filtering - the
+tool fetches no prices). At most 100 tickers per run; PennyTune never scans the
+whole market. Because the positive quality sub-scores are sector/size-relative
+percentiles (meaningful only across a large cross-section), on a small curated
+set the ranking is driven mainly by the **risk/penalty** signals (dilution,
+distress, delisting, insider selling) - it surfaces the riskiest names in your
+set. Tune the risk weighting and strategy with `--preset` / `--profile`:
 
 ```bash
-pennytune scan                                   # rank the listed universe, top 10
-pennytune scan --exchange nasdaq --top 25 --sort risk
-pennytune --profile high-return scan --preset broad   # preset + profile compose
-pennytune scan --exclude-serial-splitter --require-insider-buying --exclude-flagged
+pennytune scan AAA BBB CCC                       # rank the tickers you name
+pennytune scan                                   # rank your watchlist (top 10)
+pennytune --profile high-return scan AAA BBB --preset broad  # preset + profile
+pennytune scan AAA BBB --exclude-serial-splitter --require-insider-buying
 
 # Export the full ranked set (CSV/Parquet/JSON/Markdown); pipe clean JSON:
-pennytune scan --format parquet
-pennytune --json scan | jq '.results[0]'
+pennytune scan AAA BBB --format parquet
+pennytune --json scan AAA BBB | jq '.results[0]'
 
-# Cache-only run (no network) and a forced re-fetch:
-pennytune --offline scan
-pennytune --refresh scan
+# Cache-only run (no network):
+pennytune --offline scan AAA BBB
 ```
 
 Every other command:
@@ -292,7 +285,7 @@ pennytune cache clear --all   # clear it (confirmation-gated unless --yes)
 Output leads with a freshness header (active preset/profile + per-domain as-of
 stamps), shows a watchlist alert banner when relevant, ranks the top N, and ends
 with the short disclaimer. Exported files carry the one-line disclaimer header
-and - when a result used GDELT coverage - the GDELT attribution.
+so the disclaimer travels with the data.
 
 ## Development
 
@@ -356,7 +349,7 @@ representation is made that any account will or is likely to achieve
 profits or losses similar to any analysis, backtest, or example shown.
 
 6. THIRD-PARTY DATA "AS IS." All data is obtained from third-party and
-public sources (including SEC EDGAR, GDELT, and other public sources)
+public sources (including SEC EDGAR and other public sources)
 and is provided "AS IS." Such data may be inaccurate,
 incomplete, delayed, out of date, or wrong. The author does not create,
 endorse, verify, or guarantee any third-party data and makes no
