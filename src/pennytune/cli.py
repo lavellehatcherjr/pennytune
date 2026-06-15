@@ -35,7 +35,6 @@ from pydantic import ValidationError
 
 from pennytune import __version__, banner, output, paths
 from pennytune import scan as scan_mod
-from pennytune.cache import Cache
 from pennytune.config import (
     Config,
     Filters,
@@ -132,7 +131,6 @@ _CORE_DEPENDENCIES: tuple[str, ...] = (
     "duckdb",
     "pyarrow",
     "edgartools",
-    "vaderSentiment",
     "typer",
     "rich",
     "pyfiglet",
@@ -171,7 +169,6 @@ class GlobalState:
     profile: str | None = None
     config_path: str | None = None
     offline: bool = False
-    refresh: bool = False
     json_output: bool = False
     quiet: bool = False
     yes: bool = False
@@ -230,10 +227,7 @@ def main(
         str | None, typer.Option("--config", help="Use an alternate config file.")
     ] = None,
     offline: Annotated[
-        bool, typer.Option("--offline", help="Cache-only, no network.")
-    ] = False,
-    refresh: Annotated[
-        bool, typer.Option("--refresh", help="Ignore cache TTLs, force re-fetch.")
+        bool, typer.Option("--offline", help="No network; degraded (no live fetch).")
     ] = False,
     json_output: Annotated[
         bool, typer.Option("--json", help="Machine-readable output to stdout.")
@@ -276,7 +270,6 @@ def main(
         profile=profile,
         config_path=config_path,
         offline=offline,
-        refresh=refresh,
         json_output=json_output,
         quiet=quiet,
         yes=yes,
@@ -1056,49 +1049,6 @@ def sources(ctx: typer.Context) -> None:
         "No live prices are fetched (no technicals/spread); intraday "
         "trading-halt status is not evaluated — verify it in your broker."
     )
-
-
-# ---- cache ------------------------------------------------------------------
-
-
-@app.command()
-def cache(
-    ctx: typer.Context,
-    action: Annotated[str, typer.Argument(help="status | clear")],
-    clear_all: Annotated[
-        bool, typer.Option("--all", help="Clear every cache domain.")
-    ] = False,
-    domain: Annotated[
-        str | None, typer.Option("--domain", help="Clear only this cache domain.")
-    ] = None,
-) -> None:
-    """Inspect or clear the local data cache (status | clear)."""
-    state = _state(ctx)
-    store = Cache()
-    try:
-        if action == "status":
-            counts = store.domain_counts()
-            typer.echo(f"Cache: {store.db_path}")
-            if not counts:
-                typer.echo("  (empty)")
-            for name, count in counts.items():
-                typer.echo(f"  {name:20s} {count} entries")
-        elif action == "clear":
-            target = None if clear_all else domain
-            if not state.yes and not typer.confirm(
-                f"Clear cache ({'all domains' if target is None else target})?"
-            ):
-                typer.echo("Cancelled.")
-                return
-            removed = store.clear(target)
-            typer.echo(f"Cleared {removed} cache entries.")
-        else:
-            typer.echo(
-                f"Unknown cache action: {action!r} (use status | clear)", err=True
-            )
-            raise typer.Exit(code=int(ExitCode.USAGE_ERROR))
-    finally:
-        store.close()
 
 
 # ---- config (get | set) -----------------------------------------------------
