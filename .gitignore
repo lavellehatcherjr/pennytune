@@ -56,6 +56,10 @@ config.toml
 pennytune.toml
 *.secret
 credentials.*
+# Extra env files (.env.example is still allowed back in, above).
+*.env
+# PyPI upload credentials.
+.pypirc
 
 # NOTE: uv.lock IS committed (the supply-chain source of truth) —
 # do not add it here.
