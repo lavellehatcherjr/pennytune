@@ -21,8 +21,7 @@ from pennytune.cli import app
 from pennytune.disclaimer import EXPORT_HEADER
 from pennytune.features.delisting import DelistingInputs
 from pennytune.features.quant_scores import PeriodFinancials
-from pennytune.features.universe import UniverseCandidate, UniverseResult
-from pennytune.freshness import FreshnessReport
+from pennytune.features.universe import UniverseCandidate
 from pennytune.output import read_parquet_disclaimer
 
 runner = CliRunner()
@@ -81,7 +80,6 @@ def _evidence(
     growth: float,
     sentiment: float,
     delisting: bool = False,
-    gdelt: bool = False,
 ) -> scan_mod.RawEvidence:
     return scan_mod.RawEvidence(
         ticker=ticker,
@@ -93,7 +91,6 @@ def _evidence(
         period_t1=_period(scale=0.85),
         revenue_growth=growth,
         sentiment_compound=sentiment,
-        gdelt_used=gdelt,
         delisting=DelistingInputs(deficiency_notice=True) if delisting else None,
     )
 
@@ -106,11 +103,8 @@ _MAPPING = {
     "SENT": _evidence(
         "SENT", cap=120_000_000.0, growth=0.20, sentiment=0.95, delisting=True
     ),
-    "VALU": _evidence(
-        "VALU", cap=60_000_000.0, growth=0.20, sentiment=-0.80, gdelt=True
-    ),
+    "VALU": _evidence("VALU", cap=60_000_000.0, growth=0.20, sentiment=-0.80),
 }
-_CANDIDATES = [_candidate("SENT"), _candidate("VALU")]
 
 
 class _FixtureProvider:
@@ -119,18 +113,8 @@ class _FixtureProvider:
 
 
 def _install_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _fake_load(
-        config: object, filters: object, preset_name: str, state: object
-    ) -> tuple[UniverseResult, FreshnessReport, None]:
-        result = UniverseResult(
-            candidates=list(_CANDIDATES),
-            preset=preset_name,
-            counts={"listed": 2, "selected": 2},
-            from_cache=False,
-        )
-        return result, FreshnessReport(), None
-
-    monkeypatch.setattr(cli, "_load_universe", _fake_load)
+    # scan ranks an explicit curated set (tickers / watchlist); only the
+    # evidence provider needs a fixture - no universe is built.
     monkeypatch.setattr(
         cli, "_make_evidence_provider", lambda config, state: _FixtureProvider()
     )
@@ -178,7 +162,9 @@ def test_flow_core_research_loop(
     _init(cfg)
     _install_pipeline(monkeypatch)
 
-    scan = runner.invoke(app, ["--config", str(cfg), "scan", "--top", "5"])
+    scan = runner.invoke(
+        app, ["--config", str(cfg), "scan", "SENT", "VALU", "--top", "5"]
+    )
     assert scan.exit_code == 0, scan.output
     assert "VALU" in scan.output
     assert "Not investment advice" in scan.output  # disclaimer footer
@@ -188,8 +174,12 @@ def test_flow_core_research_loop(
     assert "composite" in inspect.output.lower()
 
     # Reproducible: the same fixtures + weights → the same JSON ranking.
-    first = runner.invoke(app, ["--config", str(cfg), "--json", "scan"]).output
-    second = runner.invoke(app, ["--config", str(cfg), "--json", "scan"]).output
+    first = runner.invoke(
+        app, ["--config", str(cfg), "--json", "scan", "SENT", "VALU"]
+    ).output
+    second = runner.invoke(
+        app, ["--config", str(cfg), "--json", "scan", "SENT", "VALU"]
+    ).output
     order1 = [r["ticker"] for r in json.loads(first)["results"]]
     order2 = [r["ticker"] for r in json.loads(second)["results"]]
     assert order1 == order2
@@ -237,12 +227,14 @@ def test_flow_export(
 
     result = runner.invoke(
         app,
-        ["--config", str(cfg), "scan", "--format", fmt, "--top", "5"],
+        ["--config", str(cfg), "scan", "SENT", "VALU", "--format", fmt, "--top", "5"],
     )
     assert result.exit_code == 0, result.output
     # output_dir defaults to ./results; redirect via config for the test.
     runner.invoke(app, ["--config", str(cfg), "config", "set", "output_dir", str(out)])
-    result = runner.invoke(app, ["--config", str(cfg), "scan", "--format", fmt])
+    result = runner.invoke(
+        app, ["--config", str(cfg), "scan", "SENT", "VALU", "--format", fmt]
+    )
     assert result.exit_code == 0, result.output
 
     files = list(out.glob(f"scan_*.{ext}"))
@@ -253,7 +245,6 @@ def test_flow_export(
     else:
         text = path.read_text(encoding="utf-8")
         assert "research/educational only" in text  # one-line disclaimer header
-        assert "GDELT Project" in text  # the mandatory GDELT attribution travels
 
 
 # ---- Flow 5: profile-switching yields different rankings --------------------
@@ -268,7 +259,17 @@ def test_flow_profile_switching(
 
     def _order(profile: str) -> list[str]:
         out = runner.invoke(
-            app, ["--config", str(cfg), "--profile", profile, "--json", "scan"]
+            app,
+            [
+                "--config",
+                str(cfg),
+                "--profile",
+                profile,
+                "--json",
+                "scan",
+                "SENT",
+                "VALU",
+            ],
         ).output
         return [r["ticker"] for r in json.loads(out)["results"]]
 
@@ -295,7 +296,9 @@ def test_flow_config_cache_sources(
     )
     _install_pipeline(monkeypatch)
     payload = json.loads(
-        runner.invoke(app, ["--config", str(cfg), "--json", "scan"]).output
+        runner.invoke(
+            app, ["--config", str(cfg), "--json", "scan", "SENT", "VALU"]
+        ).output
     )
     # valuation weight 3.0 lifts the cheap name's valuation contribution.
     valu = next(r for r in payload["results"] if r["ticker"] == "VALU")
@@ -316,29 +319,18 @@ def test_flow_offline_and_degradation(
     cfg = tmp_path / "c.toml"
     _init(cfg)
 
-    # Offline with an empty cache degrades to a valid empty result (no network).
-    offline = runner.invoke(app, ["--config", str(cfg), "--offline", "scan"])
+    # Offline: the degrading provider returns completeness-flagged evidence for
+    # the chosen ticker without any network call.
+    offline = runner.invoke(app, ["--config", str(cfg), "--offline", "scan", "AAA"])
     assert offline.exit_code == 0
 
     # Provider "down": gather returns degraded, completeness-flagged evidence.
-    def _fake_load(
-        config: object, filters: object, preset_name: str, state: object
-    ) -> tuple[UniverseResult, FreshnessReport, None]:
-        result = UniverseResult(
-            candidates=[_candidate("DOWN")],
-            preset=preset_name,
-            counts={"listed": 1, "selected": 1},
-            from_cache=False,
-        )
-        return result, FreshnessReport(), None
-
     class _Down:
         def gather(self, candidate: UniverseCandidate) -> scan_mod.RawEvidence:
             return scan_mod.degraded_evidence(candidate, "provider down")
 
-    monkeypatch.setattr(cli, "_load_universe", _fake_load)
     monkeypatch.setattr(cli, "_make_evidence_provider", lambda c, s: _Down())
-    degraded = runner.invoke(app, ["--config", str(cfg), "scan"])
+    degraded = runner.invoke(app, ["--config", str(cfg), "scan", "DOWN"])
     assert degraded.exit_code == 0
     assert "reduced data completeness" in degraded.output
 
@@ -354,7 +346,9 @@ def test_flow_machine_readable_and_banner(
     _install_pipeline(monkeypatch)
 
     # --json is clean and parses; no banner/decoration leaks in.
-    out = runner.invoke(app, ["--config", str(cfg), "--json", "scan"]).output
+    out = runner.invoke(
+        app, ["--config", str(cfg), "--json", "scan", "SENT", "VALU"]
+    ).output
     payload = json.loads(out)  # must parse
     assert "Tune out the noise." not in out  # banner never in machine output
     assert payload["results"]
