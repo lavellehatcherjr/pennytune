@@ -1,0 +1,17 @@
+# Dependabot config. Dependabot *proposes* updates by opening PRs; it never
+# auto-merges. Every Dependabot PR runs the full cross-platform CI matrix +
+# pip-audit and is reviewed before merge, preserving the deliberate-upgrade
+# supply-chain discipline. Auto-merge stays disabled.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
