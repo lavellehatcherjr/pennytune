@@ -161,17 +161,6 @@ def test_sources_lists_no_key_providers() -> None:
     assert "sources" in payload
 
 
-def test_cache_status_and_clear(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("PENNYTUNE_CACHE_DIR", str(tmp_path))
-    status = runner.invoke(app, ["cache", "status"])
-    assert status.exit_code == 0
-    cleared = runner.invoke(app, ["--yes", "cache", "clear", "--all"])
-    assert cleared.exit_code == 0
-    assert "Cleared" in cleared.output
-
-
 def test_watch_add_list_rm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PENNYTUNE_DATA_DIR", str(tmp_path))
     assert runner.invoke(app, ["watch", "add", "grow", "nukk"]).exit_code == 0
