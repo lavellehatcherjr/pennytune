@@ -35,7 +35,7 @@ from pydantic import ValidationError
 
 from pennytune import __version__, banner, output, paths
 from pennytune import scan as scan_mod
-from pennytune.cache import Cache, CachePolicy, OfflineCacheMissError
+from pennytune.cache import Cache
 from pennytune.config import (
     Config,
     Filters,
@@ -69,12 +69,9 @@ from pennytune.features.universe import (
     SEC_UNIVERSE_URL,
     EdgarListing,
     UniverseCandidate,
-    UniverseResult,
     parse_edgar_exchange_map,
 )
-from pennytune.features.universe import build_universe as _build_universe
 from pennytune.features.watchlist import Watchlist
-from pennytune.freshness import FreshnessReport
 from pennytune.profiles import get_profile
 from pennytune.providers.base import ProviderError
 from pennytune.providers.http import SafeHttpClient
@@ -728,56 +725,6 @@ def _resolve_scan_config(
         guardrails=get_profile(profile_name).guardrails,
     )
     return request, cfg.filters, preset_name
-
-
-def _load_universe(
-    cfg: Config, filters: Filters, preset_name: str, state: GlobalState
-) -> tuple[UniverseResult, FreshnessReport, str | None]:
-    """Build the universe, degrading to empty on outage (overridable)."""
-    report_freshness = FreshnessReport()
-    policy = CachePolicy(offline=state.offline, refresh=state.refresh)
-    store = Cache()
-    rl = cfg.rate_limits
-    limiter = RateLimiter({"edgar": rl.edgar_rps})
-    identity = cfg.edgar_identity or "PennyTune research tool"
-    client = SafeHttpClient(limiter=limiter, user_agent=identity)
-
-    def fetch_sec_universe() -> dict[str, Any]:
-        return cast(
-            dict[str, Any],
-            client.get_json(
-                SEC_UNIVERSE_URL,
-                provider="edgar",
-                headers={"User-Agent": identity},
-            ),
-        )
-
-    try:
-        result = _build_universe(
-            fetch_sec_universe=fetch_sec_universe,
-            cache=store,
-            filters=filters,
-            preset_name=preset_name,
-            policy=policy,
-            freshness=report_freshness,
-            universe_ttl_seconds=cfg.cache_ttl.universe_seconds,
-        )
-        return result, report_freshness, None
-    except (ProviderError, OfflineCacheMissError) as exc:
-        # Graceful degradation when offline: no live source and no cached
-        # universe yields an empty (but valid) result with the reason
-        # surfaced, not a hard fail.
-        empty = UniverseResult(
-            candidates=[],
-            preset=preset_name,
-            counts={},
-            from_cache=True,
-            notes=["cache-only: no cached universe available"],
-        )
-        return empty, report_freshness, str(exc)
-    finally:
-        client.close()
-        store.close()
 
 
 def _open_watchlist() -> Watchlist | None:
