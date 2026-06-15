@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/lavellehatcherjr/pennytune/main/docs/assets/pennytune-logo.png" alt="PennyTune" width="400">
+</p>
+
 # PennyTune
 
 **Tune out the noise.**
@@ -5,7 +9,7 @@
 [![CI](https://github.com/lavellehatcherjr/pennytune/actions/workflows/ci.yml/badge.svg)](https://github.com/lavellehatcherjr/pennytune/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/pennytune)](https://pypi.org/project/pennytune/)
 [![Downloads](https://img.shields.io/pepy/dt/pennytune)](https://pepy.tech/project/pennytune)
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/lavellehatcherjr/pennytune/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-blue)](https://github.com/lavellehatcherjr/pennytune/actions/workflows/ci.yml)
 
@@ -131,8 +135,8 @@ you do not agree, do not install or use the software.
 The US micro-cap segment is full of companies that look cheap *for cause* -
 cash-burning, diluting, near delisting, or structured for manipulation. The hard
 part of due diligence is reading the filings to find those landmines. PennyTune
-does that reading for you: point it at a ticker (or screen the SEC-listed
-universe by filing quality) and it extracts the risk signals and forensic flags
+does that reading for you: point it at a ticker, or rank a curated set of
+tickers you choose, and it extracts the risk signals and forensic flags
 from the company's SEC filings and **shows its work for every one** - each flag
 traced back to the filing it came from.
 
@@ -262,7 +266,7 @@ pennytune scan AAA BBB --exclude-serial-splitter --require-insider-buying
 pennytune scan AAA BBB --format parquet
 pennytune --json scan AAA BBB | jq '.results[0]'
 
-# Cache-only run (no network):
+# Offline / no-network run (degraded; no live SEC fetch):
 pennytune --offline scan AAA BBB
 ```
 
@@ -299,7 +303,7 @@ Upgrades are deliberate and reviewed; nothing auto-merges.
 
 ## License
 
-[MIT](LICENSE). © Lavelle Hatcher Jr.
+[MIT](https://github.com/lavellehatcherjr/pennytune/blob/main/LICENSE). © Lavelle Hatcher Jr.
 
 ---
 
