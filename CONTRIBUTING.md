@@ -33,7 +33,7 @@ To avoid wasted effort, please keep changes within PennyTune's deliberate scope:
   diligence — never buy/sell advice, verdicts, or price predictions. PRs must
   not introduce investment advice, recommendations, or outcome predictions.
 - **Public, no-key data only.** PennyTune runs on public, no-API-key data (SEC
-  EDGAR + GDELT). PRs adding paid or API-key-gated data sources are out of scope.
+  EDGAR). PRs adding paid or API-key-gated data sources are out of scope.
 - **No prices / no technicals.** By design the tool fetches no live prices and
   does not assess tradeability. PRs adding price or technical-analysis features
   are out of scope.
