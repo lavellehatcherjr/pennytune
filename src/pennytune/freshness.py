@@ -5,9 +5,8 @@ data actually is - and is honest about the one place "today" has a lag. Lags
 are labeled in plain English (13F institutional holdings are quarterly and
 lagged).
 
-There is **no price history**: the only price the tool uses is a current
-snapshot (for the universe and market cap), labeled as such - the header never
-implies OHLCV history or that tradeability was assessed.
+The tool fetches no live prices and no price history; freshness covers the
+filing-derived domains only.
 """
 
 from __future__ import annotations
@@ -21,20 +20,13 @@ __all__ = [
     "DomainFreshness",
     "FreshnessReport",
     "THIRTEENF_LAG_LABEL",
-    "PRICE_LABEL",
     "filings_news",
     "financials",
-    "current_price",
-    "universe",
     "institutional_13f",
 ]
 
 THIRTEENF_LAG_LABEL = (
     "13F institutional holdings are quarterly and lagged (~45 days after quarter-end)."
-)
-PRICE_LABEL = (
-    "current price only, ~15-min delayed; used for the universe and market cap "
-    "— no price history (price/technical analysis is out of scope)."
 )
 
 
@@ -43,8 +35,6 @@ class FreshnessClass(StrEnum):
 
     LIVE = "live"  # filings/news - same-day / near-real-time
     LATEST_FILED = "latest_filed"  # financials - newest 10-K/10-Q the issuer filed
-    DELAYED_SNAPSHOT = "delayed_snapshot"  # current price - ~15-min delayed, no history
-    FETCH_TIME = "fetch_time"  # universe - stamped with the fetch time
     LAGGED = "lagged"  # 13F institutional holdings - structurally lagged
 
 
@@ -106,30 +96,6 @@ def financials(
         f"latest filed {period} (filed {filed_date})",
         FreshnessClass.LATEST_FILED,
         "the newest 10-K/10-Q the company has reported",
-        from_cache,
-    )
-
-
-def current_price(
-    now: datetime | None = None, *, from_cache: bool = False
-) -> DomainFreshness:
-    return DomainFreshness(
-        "current price",
-        _now_str(now),
-        FreshnessClass.DELAYED_SNAPSHOT,
-        PRICE_LABEL,
-        from_cache,
-    )
-
-
-def universe(
-    now: datetime | None = None, *, from_cache: bool = False
-) -> DomainFreshness:
-    return DomainFreshness(
-        "universe",
-        _now_str(now),
-        FreshnessClass.FETCH_TIME,
-        "SEC listed-company file",
         from_cache,
     )
 
