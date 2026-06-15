@@ -80,7 +80,7 @@ def test_scan_blocked_before_init_then_allowed(tmp_path: Path) -> None:
     )
     assert setup.exit_code == 0, setup.output
     # --offline → no network; empty cache degrades to an empty (valid) result.
-    after = runner.invoke(app, ["--config", str(cfg), "--offline", "scan"])
+    after = runner.invoke(app, ["--config", str(cfg), "--offline", "scan", "AAA"])
     assert after.exit_code == 0, after.output
 
 
@@ -138,7 +138,9 @@ def test_scan_json_is_clean_and_parses(tmp_path: Path) -> None:
             "--i-understand-the-risks",
         ],
     )
-    result = runner.invoke(app, ["--config", str(cfg), "--offline", "--json", "scan"])
+    result = runner.invoke(
+        app, ["--config", str(cfg), "--offline", "--json", "scan", "AAA"]
+    )
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert "_disclaimer" in payload
@@ -149,12 +151,12 @@ def test_scan_json_is_clean_and_parses(tmp_path: Path) -> None:
 # ---- sources / cache / watch screens ----------------------------------------
 
 
-def test_sources_lists_no_key_providers_and_attribution() -> None:
+def test_sources_lists_no_key_providers() -> None:
     result = runner.invoke(app, ["sources"])
     assert result.exit_code == 0
     assert "SEC EDGAR" in result.output
     assert "no API keys" in result.output
-    assert "GDELT Project" in result.output  # mandatory attribution
+    assert "GDELT" not in result.output  # news/GDELT removed → SEC EDGAR only
     payload = json.loads(runner.invoke(app, ["--json", "sources"]).output)
     assert "sources" in payload
 
@@ -193,7 +195,7 @@ def test_scan_carries_due_diligence_note(tmp_path: Path) -> None:
             "--i-understand-the-risks",
         ],
     )
-    result = runner.invoke(app, ["--config", str(cfg), "--offline", "scan"])
+    result = runner.invoke(app, ["--config", str(cfg), "--offline", "scan", "AAA"])
     assert result.exit_code == 0, result.output
     assert "due diligence" in result.output.lower()
     assert "tradeability" in result.output.lower()
@@ -292,7 +294,7 @@ def test_scan_offline_makes_no_network_calls(
         raise AssertionError("network call attempted under --offline")
 
     monkeypatch.setattr(SafeHttpClient, "get_json", _boom)
-    result = runner.invoke(app, ["--config", str(cfg), "--offline", "scan"])
+    result = runner.invoke(app, ["--config", str(cfg), "--offline", "scan", "AAA"])
     assert result.exit_code == 0, result.output  # zero network → graceful empty
 
 
@@ -301,29 +303,12 @@ def test_scan_renders_table_and_exports(
 ) -> None:
     from pennytune import cli
     from pennytune import scan as scan_mod
-    from pennytune.features.universe import UniverseCandidate, UniverseResult
-    from pennytune.freshness import FreshnessReport
+    from pennytune.features.universe import UniverseCandidate
 
     cfg = tmp_path / "c.toml"
     out = tmp_path / "out"
     _init(cfg)
     runner.invoke(app, ["--config", str(cfg), "config", "set", "output_dir", str(out)])
-
-    candidates = [
-        UniverseCandidate("AAA", "AAA", "0000000001", "Nasdaq"),
-        UniverseCandidate("BBB", "BBB", "0000000002", "Nasdaq"),
-    ]
-
-    def _fake_load(
-        config: object, filters: object, preset_name: str, state: object
-    ) -> tuple[UniverseResult, FreshnessReport, None]:
-        result = UniverseResult(
-            candidates=candidates,
-            preset=preset_name,
-            counts={"listed": 2, "selected": 2},
-            from_cache=False,
-        )
-        return result, FreshnessReport(), None
 
     class _FixtureProvider:
         def gather(self, candidate: UniverseCandidate) -> scan_mod.RawEvidence:
@@ -336,12 +321,13 @@ def test_scan_renders_table_and_exports(
                 sentiment_compound=0.5,
             )
 
-    monkeypatch.setattr(cli, "_load_universe", _fake_load)
     monkeypatch.setattr(
         cli, "_make_evidence_provider", lambda config, state: _FixtureProvider()
     )
 
-    result = runner.invoke(app, ["--config", str(cfg), "scan", "--top", "5"])
+    result = runner.invoke(
+        app, ["--config", str(cfg), "scan", "AAA", "BBB", "--top", "5"]
+    )
     assert result.exit_code == 0, result.output
     assert "AAA" in result.output
     assert "Wrote" in result.output
@@ -413,23 +399,10 @@ def test_scan_quiet_suppresses_decoration(
 ) -> None:
     from pennytune import cli
     from pennytune import scan as scan_mod
-    from pennytune.features.universe import UniverseCandidate, UniverseResult
-    from pennytune.freshness import FreshnessReport
+    from pennytune.features.universe import UniverseCandidate
 
     cfg = tmp_path / "c.toml"
     _init(cfg)
-    candidate = UniverseCandidate("AAA", "AAA", "0000000001", "Nasdaq")
-
-    def _fake_load(
-        config: object, filters: object, preset_name: str, state: object
-    ) -> tuple[UniverseResult, FreshnessReport, None]:
-        result = UniverseResult(
-            candidates=[candidate],
-            preset=preset_name,
-            counts={"listed": 1, "selected": 1},
-            from_cache=False,
-        )
-        return result, FreshnessReport(), None
 
     class _FixtureProvider:
         def gather(self, c: UniverseCandidate) -> scan_mod.RawEvidence:
@@ -437,11 +410,10 @@ def test_scan_quiet_suppresses_decoration(
                 ticker=c.ticker, sic_sector="3674", sic_code=3674, revenue_growth=0.2
             )
 
-    monkeypatch.setattr(cli, "_load_universe", _fake_load)
     monkeypatch.setattr(
         cli, "_make_evidence_provider", lambda config, state: _FixtureProvider()
     )
-    result = runner.invoke(app, ["--config", str(cfg), "--quiet", "scan"])
+    result = runner.invoke(app, ["--config", str(cfg), "--quiet", "scan", "AAA"])
     assert result.exit_code == 0, result.output
     assert "Universe " not in result.output  # freshness header decoration suppressed
     assert "ranked candidates" not in result.output  # table title suppressed
@@ -683,55 +655,6 @@ def _ftd_evidence(**kwargs: Any) -> Any:
     return FtdEvidence(**defaults)
 
 
-class _StubNews:
-    """Stands in for GdeltNewsProvider.get_coverage_evidence."""
-
-    def __init__(self, evidence: Any) -> None:
-        self._evidence = evidence
-        self.ticker: str | None = None
-        self.company: Any = None
-        self.event_tape: Any = "unset"
-
-    def get_coverage_evidence(
-        self, ticker: str, company: str, *, event_tape: Any = None, now: Any = None
-    ) -> Any:
-        self.ticker = ticker
-        self.company = company
-        self.event_tape = event_tape
-        return self._evidence
-
-
-def _coverage_evidence(**kwargs: Any) -> Any:
-    from pennytune.features.news import (
-        GDELT_ATTRIBUTION,
-        CoverageEvidence,
-        CoverageProfile,
-        GdeltSignals,
-        RedFlags,
-        RiskFactorDiff,
-        ToneAggregate,
-    )
-
-    profile = CoverageProfile(
-        tone=ToneAggregate(mean_compound=0.30, net_label="positive", count=4),
-        red_flags=RedFlags(),
-        risk_diff=RiskFactorDiff(),
-        gdelt=GdeltSignals(article_count=4, theme_tags=["litigation"]),
-        catalysts=[],
-        material_filings=[],
-        attribution=GDELT_ATTRIBUTION,
-    )
-    defaults: dict[str, Any] = {
-        "sentiment_compound": 0.30,
-        "news_available": True,
-        "gdelt_used": True,
-        "profile": profile,
-        "completeness": [],
-    }
-    defaults.update(kwargs)
-    return CoverageEvidence(**defaults)
-
-
 def test_make_evidence_provider_offline_or_no_identity_is_degrading() -> None:
     from pennytune import cli
     from pennytune.config import default_config
@@ -797,8 +720,7 @@ def test_live_provider_maps_fundamentals_dilution_sic_insider_and_events() -> No
         ftd=FtdContext(present=True, total_fails=5000.0, window_count=2)
     )
     ftd = _StubFtd(ftd_ev)
-    news = _StubNews(_coverage_evidence())
-    stubs = (fundamentals, dilution, insider, suspensions, ftd, news, _StubClient())
+    stubs = (fundamentals, dilution, insider, suspensions, ftd, _StubClient())
     provider = cli._LiveEvidenceProvider(*stubs)  # type: ignore[arg-type]
     ev = provider.gather(UniverseCandidate("AAA", "AAA", "0000000001", "Nasdaq"))
 
@@ -828,13 +750,7 @@ def test_live_provider_maps_fundamentals_dilution_sic_insider_and_events() -> No
     assert any("fails-to-deliver context" in note for note in ev.completeness)
     # the SAME submissions payload is shared by all three live slices (one fetch)
     assert dilution.submissions_arg is insider.submissions_arg
-    # news/coverage = live (GDELT breadth + the reused EDGAR filing spine)
-    assert ev.sentiment_compound == 0.30 and ev.news_available is True
-    assert ev.gdelt_used is True  # → the GDELT attribution travels
-    assert news.ticker == "AAA" and news.company == "Full Co"
-    assert news.event_tape is ev.event_tape  # EDGAR spine reused, not re-fetched
-    assert any("coverage characterization" in note for note in ev.completeness)
-    assert ev.market_cap is None  # still no live price
+    assert ev.market_cap is None  # still no live price (news/GDELT removed)
 
 
 def test_live_provider_degrades_when_companyfacts_unavailable() -> None:
@@ -847,17 +763,15 @@ def test_live_provider_degrades_when_companyfacts_unavailable() -> None:
     insider = _StubInsider(_insider_evidence())
     suspensions = _StubSuspensions(_halt_evidence())
     ftd = _StubFtd(_ftd_evidence())
-    news = _StubNews(_coverage_evidence())
-    stubs = (fundamentals, dilution, insider, suspensions, ftd, news, _StubClient())
+    stubs = (fundamentals, dilution, insider, suspensions, ftd, _StubClient())
     provider = cli._LiveEvidenceProvider(*stubs)  # type: ignore[arg-type]
     ev = provider.gather(UniverseCandidate("ZZZ", "ZZZ", "0000000009", "Nasdaq"))
     assert ev.period_t is None  # suppressed, not fabricated
     assert ev.dilution is None and ev.sic_code is None  # whole name degraded
     assert ev.insider_transactions == () and ev.halt is None and ev.ftd is None
-    assert ev.gdelt_used is False and ev.news_available is False
     # nothing attempted once companyfacts failed
     assert dilution.cik is None and insider.cik is None
-    assert suspensions.ticker is None and ftd.ticker is None and news.ticker is None
+    assert suspensions.ticker is None and ftd.ticker is None
     assert any("companyfacts unavailable" in note for note in ev.completeness)
 
 
@@ -870,7 +784,6 @@ def test_live_provider_resolves_cik_via_sec_map_for_inspect() -> None:
     insider = _StubInsider(_insider_evidence())
     suspensions = _StubSuspensions(_halt_evidence())
     ftd = _StubFtd(_ftd_evidence())
-    news = _StubNews(_coverage_evidence())
     # inspect builds a candidate with no CIK → resolve via the SEC exchange map.
     sec_map = {
         "fields": ["cik", "name", "ticker", "exchange"],
@@ -882,7 +795,6 @@ def test_live_provider_resolves_cik_via_sec_map_for_inspect() -> None:
         insider,
         suspensions,
         ftd,
-        news,
         _StubClient(sec_map),
     )
     provider = cli._LiveEvidenceProvider(*stubs)  # type: ignore[arg-type]
@@ -890,9 +802,8 @@ def test_live_provider_resolves_cik_via_sec_map_for_inspect() -> None:
     assert fundamentals.cik == "0000000001"  # resolved + zero-padded
     assert ev.period_t is not None and ev.sic_code == 2836
     assert insider.cik == "0000000001"
-    # suspension matched by entityName; FTD + GDELT keyed by ticker / company
+    # suspension matched by entityName; FTD keyed by ticker
     assert suspensions.company == "Full Co" and ftd.ticker == "aaa"
-    assert news.company == "Full Co"
 
 
 def test_live_provider_degrades_when_ticker_has_no_cik() -> None:
@@ -904,7 +815,6 @@ def test_live_provider_degrades_when_ticker_has_no_cik() -> None:
     insider = _StubInsider(_insider_evidence())
     suspensions = _StubSuspensions(_halt_evidence())
     ftd = _StubFtd(_ftd_evidence())
-    news = _StubNews(_coverage_evidence())
     empty_map = {"fields": ["cik", "name", "ticker", "exchange"], "data": []}
     stubs = (
         fundamentals,
@@ -912,7 +822,6 @@ def test_live_provider_degrades_when_ticker_has_no_cik() -> None:
         insider,
         suspensions,
         ftd,
-        news,
         _StubClient(empty_map),
     )
     provider = cli._LiveEvidenceProvider(*stubs)  # type: ignore[arg-type]
@@ -920,5 +829,4 @@ def test_live_provider_degrades_when_ticker_has_no_cik() -> None:
     assert ev.period_t is None and ev.dilution is None
     assert fundamentals.cik is None  # never fetched without a CIK
     assert insider.cik is None and suspensions.ticker is None and ftd.ticker is None
-    assert news.ticker is None
     assert any("no SEC CIK" in note for note in ev.completeness)
