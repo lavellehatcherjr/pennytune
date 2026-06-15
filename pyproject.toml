@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "pennytune"
 version = "0.1.0"
-description = "PennyTune is a free, no-API-key command-line forensic due-diligence tool for US-listed micro-caps: it surfaces risk signals and forensic flags from a company's SEC filings - accounting-quality and distress scores, dilution and corporate-action risk, insider activity, 8-K material events, delisting-notice and active trading-suspension risk, fails-to-deliver settlement context, and news-coverage characterization - each traced to the underlying filing, for research only, not investment advice."
+description = "PennyTune is a free, no-API-key command-line forensic due-diligence tool for US-listed micro-caps: it surfaces risk signals and forensic flags from a company's SEC filings (accounting-quality and distress scores, dilution and corporate-action risk, insider activity, 8-K material events, delisting-notice and active trading-suspension risk, and fails-to-deliver settlement context), each traced to the underlying filing, for research only, not investment advice."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Lavelle Hatcher Jr" }]
@@ -37,7 +37,6 @@ dependencies = [
     "duckdb==1.5.3",
     "pyarrow>=14.0.1",
     "edgartools",
-    "vaderSentiment==3.3.2",
     "typer",
     "rich",
     "pyfiglet",
