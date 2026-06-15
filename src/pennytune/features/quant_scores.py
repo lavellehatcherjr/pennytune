@@ -2,11 +2,12 @@
 
 Pure pandas/numpy math on the EDGAR financial-statement line items the
 fundamentals pipeline already pulls (plus market cap from the profile feed).
-No new data sources. Implements Altman Z″, Beneish M (+ 8 sub-indices),
-Dechow F (Model 1), Montier C, Piotroski F, Sloan accruals (both forms),
-cash-runway/financing-cliff, quality ratios, EV/FCF valuation (tier-safe),
-sector/size-relative percentiles, the Altman→bond-rating mapping, and the
-up-market risk modules.
+No new data sources. The scan/inspect composite consumes Altman Z″ (with the
+Altman→bond-rating mapping), Beneish M (+ 8 sub-indices), Piotroski F, EV/FCF
+valuation (tier-safe), the up-market risk modules, and sector/size-relative
+percentiles. Dechow F (Model 1), Montier C, Sloan accruals, and
+cash-runway/financing-cliff are implemented and unit-tested but not wired into
+the composite.
 
 SUPPRESS, DO NOT IMPUTE: when a required input is missing/zero/invalid the
 affected score is suppressed and marked incomplete - never computed with zeros
@@ -40,7 +41,6 @@ __all__ = [
     "piotroski_f",
     "accruals",
     "cash_runway",
-    "quality_ratios",
     "ev_valuation",
     "up_market_modules",
     "is_financials_sic",
@@ -628,44 +628,6 @@ def cash_runway(
         value=runway,
         computable=True,
         components={"quarterly_burn": burn},
-        flags=flags,
-        note=MODELS_CAVEAT,
-    )
-
-
-# ---- quality ratios ---------------------------------------------------------
-
-
-def quality_ratios(
-    period: PeriodFinancials, *, cost_of_capital: float = 0.10
-) -> ScoreResult:
-    """ROCE, debt-to-equity, and OCF positivity."""
-    capital_employed = (
-        period.total_assets - period.current_liabilities
-        if (period.total_assets is not None and period.current_liabilities is not None)
-        else None
-    )
-    roce = _ratio(period.ebit, capital_employed)
-    d_e = _ratio(_debt(period), period.book_equity)
-    components: dict[str, float] = {}
-    if roce is not None:
-        components["roce"] = roce
-    if d_e is not None:
-        components["debt_to_equity"] = d_e
-    if not components:
-        return ScoreResult(
-            "quality", missing=["roce/debt_to_equity"], note="suppressed"
-        )
-    flags: list[str] = []
-    if roce is not None and roce > cost_of_capital:
-        flags.append("roce-above-cost-of-capital")
-    if period.operating_cash_flow is not None and period.operating_cash_flow > 0:
-        flags.append("ocf-positive")
-    return ScoreResult(
-        "quality",
-        value=roce,
-        computable=True,
-        components=components,
         flags=flags,
         note=MODELS_CAVEAT,
     )
