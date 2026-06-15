@@ -58,9 +58,7 @@ from pennytune.features.insider import (
 from pennytune.features.manipulation import (
     ManipulationInputs,
     ManipulationProfile,
-    compute_manipulation,
 )
-from pennytune.features.news import GDELT_ATTRIBUTION
 from pennytune.features.quant_scores import (
     PeriodFinancials,
     ScoreResult,
@@ -378,9 +376,10 @@ def compute_signals(evidence: RawEvidence, *, no_news: bool) -> ComputedSignals:
         sentiment_subscore = round((evidence.sentiment_compound + 1.0) / 2.0, 4)
 
     dilution = compute_dilution(evidence.dilution) if evidence.dilution else None
-    manipulation = (
-        compute_manipulation(evidence.manipulation) if evidence.manipulation else None
-    )
+    # Structural manipulation-susceptibility is not wired to the live evidence
+    # provider (no ManipulationInputs are built from real filings), so it never
+    # contributes a penalty; the field stays for config/back-compat.
+    manipulation = None
     delisting = compute_delisting(evidence.delisting) if evidence.delisting else None
     insider = compute_insider_signal(
         evidence.insider_transactions,
@@ -477,11 +476,6 @@ def _penalties(signals: ComputedSignals) -> dict[str, Penalty]:
         sev = _SEVERITY_SCALE.get(signals.dilution.severity, 0.0)
         if sev > 0:
             penalties["dilution"] = Penalty(severity=sev)
-    if signals.manipulation is not None:
-        sev = _SEVERITY_SCALE.get(signals.manipulation.severity, 0.0)
-        if sev > 0:
-            conf = 0.7 if signals.manipulation.low_confidence_flags else 1.0
-            penalties["manipulation"] = Penalty(severity=sev, confidence=conf)
     if signals.delisting is not None:
         sev = _DELIST_TIER.get(signals.delisting.tier, 0.0)
         if sev > 0:
@@ -702,7 +696,7 @@ def run_scan(
         for ticker, sig in signals_by_ticker.items()
         if sig.completeness
     }
-    attributions = [GDELT_ATTRIBUTION] if any(s.gdelt_used for s in signals) else []
+    attributions: list[str] = []
     return ScanReport(
         result=result,
         signals=signals_by_ticker,
@@ -719,5 +713,5 @@ def run_scan(
         attributions=attributions,
         # Carry the universe-stage notes (e.g. the --sector missing-data /
         # no-match messages) so a narrowed/empty universe is explained.
-        notes=list(universe_notes) if universe_notes else [UNIVERSE_NOTE],
+        notes=list(universe_notes) if universe_notes is not None else [UNIVERSE_NOTE],
     )
