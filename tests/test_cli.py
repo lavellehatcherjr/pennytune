@@ -222,7 +222,7 @@ def test_interactive_init_displays_full_disclaimer_before_ack(
     assert result.exit_code == 0, result.output
     # The COMPLETE text is shown before acknowledgment, not a summary/pointer.
     assert FULL_DISCLAIMER in result.output
-    assert "12. ACCEPTANCE." in result.output
+    assert "14. ACCEPTANCE." in result.output
 
 
 def test_interactive_init_shows_disclaimer_even_when_rejected(
