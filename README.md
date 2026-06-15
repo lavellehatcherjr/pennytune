@@ -278,8 +278,6 @@ pennytune config get          # view all settings (EDGAR email redacted)
 pennytune config set weights.valuation 1.5   # tune a scoring weight
 pennytune config set profile custom          # switch to hand-tuned weights
 pennytune sources             # data sources, free-tier limits, contacted domains
-pennytune cache status        # inspect the local DuckDB/Parquet cache
-pennytune cache clear --all   # clear it (confirmation-gated unless --yes)
 ```
 
 Output leads with a freshness header (active preset/profile + per-domain as-of
