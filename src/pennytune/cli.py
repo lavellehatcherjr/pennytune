@@ -884,9 +884,6 @@ def scan(
             "--require-insider-buying", help="Keep only recent insider buying."
         ),
     ] = False,
-    no_news: Annotated[
-        bool, typer.Option("--no-news", help="Suppress the sentiment sub-score.")
-    ] = False,
     top: Annotated[
         int, typer.Option("--top", help="How many ranked names to display.")
     ] = 10,
@@ -923,7 +920,6 @@ def scan(
         exclude_flagged=exclude_flagged,
         exclude_serial_splitter=exclude_serial_splitter,
         require_insider_buying=require_insider_buying,
-        no_news=no_news,
     )[0]
     provider = _make_evidence_provider(cfg, state)
     watchlist = _open_watchlist()
