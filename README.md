@@ -194,7 +194,7 @@ in the SEC request header, and never transmitted to the author or any third
 party. Any valid personal email works; setup checks the format, not the provider.
 
 PennyTune is a research tool and does **not** republish raw third-party
-datasets; downloaded vendor data and the local cache are never committed.
+datasets; your config and any exported results stay local (never committed).
 
 ## Install
 
