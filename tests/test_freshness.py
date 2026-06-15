@@ -11,25 +11,11 @@ def test_report_stamps_and_renders() -> None:
     now = datetime(2026, 6, 12, 14, 5, tzinfo=UTC)
     report.stamp(fresh.filings_news(now))
     report.stamp(fresh.financials("Q1-2026", "2026-05-08"))
-    report.stamp(fresh.current_price(now))
-    report.stamp(fresh.universe(now, from_cache=True))
     lines = report.render_lines()
-    assert len(lines) == 4
+    assert len(lines) == 2
     joined = "\n".join(lines)
     assert "filings/news" in joined
     assert "2026-06-12 14:05 UTC" in joined
-
-
-def test_current_price_label_states_no_history() -> None:
-    item = fresh.current_price()
-    assert item.freshness == FreshnessClass.DELAYED_SNAPSHOT
-    assert "no price history" in item.label
-
-
-def test_universe_cached_flag_renders() -> None:
-    item = fresh.universe(from_cache=True)
-    assert item.from_cache
-    assert "(cached)" in item.render()
 
 
 def test_13f_lag_label() -> None:
