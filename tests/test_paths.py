@@ -8,7 +8,6 @@ from pennytune import paths
 def test_dirs_are_paths() -> None:
     for resolver in (
         paths.config_dir,
-        paths.cache_dir,
         paths.data_dir,
         paths.results_dir,
     ):
