@@ -16,7 +16,6 @@ import pytest
 
 from pennytune import disclaimer
 from pennytune.config import Config, flatten
-from pennytune.features.news import GDELT_ATTRIBUTION
 from pennytune.providers.base import DisallowedDomainError
 from pennytune.providers.http import ALLOWED_DOMAIN_SUFFIXES, SafeHttpClient
 
@@ -94,14 +93,12 @@ def test_config_has_no_secret_fields() -> None:
 # ---- egress allow-list is the documented no-key domains only -----------------
 
 
-def test_egress_allowlist_is_documented_no_key_domains() -> None:
-    assert set(ALLOWED_DOMAIN_SUFFIXES) == {
-        "sec.gov",
-        "gdeltproject.org",
-    }
-    # No keyed/price-vendor domains may be present.
+def test_egress_allowlist_is_sec_only() -> None:
+    # SEC EDGAR is the ONLY egress destination (news/GDELT removed).
+    assert set(ALLOWED_DOMAIN_SUFFIXES) == {"sec.gov"}
+    # No keyed/price-vendor or other third-party domains may be present.
     joined = " ".join(ALLOWED_DOMAIN_SUFFIXES)
-    for vendor in ("alpaca", "polygon", "finnhub", "iex", "yahoo", "stooq"):
+    for vendor in ("alpaca", "polygon", "finnhub", "iex", "yahoo", "stooq", "gdelt"):
         assert vendor not in joined
 
 
@@ -116,7 +113,7 @@ def test_http_client_rejects_non_https_and_off_allowlist() -> None:
         client.close()
 
 
-# ---- disclaimer + GDELT attribution ship -------------------------------------
+# ---- disclaimer ships ---------------------------------------------------------
 
 
 def test_full_disclaimer_has_all_twelve_sections() -> None:
@@ -124,11 +121,6 @@ def test_full_disclaimer_has_all_twelve_sections() -> None:
     assert "NOT INVESTMENT ADVICE" in text.upper()
     for section in range(1, 13):
         assert f"{section}." in text, f"disclaimer missing section {section}"
-
-
-def test_gdelt_attribution_credits_the_project() -> None:
-    assert "GDELT Project" in GDELT_ATTRIBUTION
-    assert "gdeltproject.org" in GDELT_ATTRIBUTION
 
 
 # ---- .gitignore keeps secrets and downloaded data out of the repo ------------
