@@ -1,8 +1,8 @@
 """Per-provider rate limiting and HTTP-429 backoff.
 
-Token-bucket limiters (pyrate-limiter 4.x) sized to each free tier - EDGAR
-~8/sec (10/sec hard ceiling), GDELT polite polling - and a tenacity
-exponential-backoff retrier for HTTP 429 (≈2/4/8/16s).
+A token-bucket limiter (pyrate-limiter 4.x) sized to the SEC EDGAR free tier
+(~8/sec, with the 10/sec hard ceiling) plus a tenacity exponential-backoff
+retrier for HTTP 429 (≈2/4/8/16s).
 There are no keyed/price providers, so there are no per-key quotas to manage.
 """
 
