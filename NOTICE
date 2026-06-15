@@ -22,7 +22,6 @@ Runtime dependencies
 - pandas               BSD-3-Clause     Pandas Development Team
 - numpy                BSD-3-Clause     NumPy Developers
                        (compound SPDX; includes bundled-library licenses)
-- duckdb               MIT              DuckDB Foundation
 - pyarrow              Apache-2.0       Apache Arrow Developers
 - edgartools           MIT              Dwight Gunning
 - typer                MIT              Sebastian Ramirez
@@ -94,7 +93,6 @@ Some Python wheels bundle precompiled native libraries:
   because numpy is installed.
 - pyarrow bundles Apache Arrow C++ (Apache-2.0).
 - lxml bundles libxml2 and libxslt (MIT), by Daniel Veillard / the GNOME project.
-- duckdb bundles the DuckDB engine (C++, MIT).
 - certifi bundles the Mozilla CA certificate bundle (MPL-2.0).
 
 --------------------------------------------------------------------------------
