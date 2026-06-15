@@ -17,7 +17,6 @@ from platformdirs import PlatformDirs
 __all__ = [
     "APP_NAME",
     "config_dir",
-    "cache_dir",
     "data_dir",
     "results_dir",
     "config_file",
@@ -40,11 +39,6 @@ def _resolve(env_var: str, default: str) -> Path:
 def config_dir() -> Path:
     """Per-OS user config directory (holds ``config.toml``)."""
     return _resolve("PENNYTUNE_CONFIG_DIR", _DIRS.user_config_dir)
-
-
-def cache_dir() -> Path:
-    """Per-OS user cache directory (DuckDB/Parquet cache; never committed)."""
-    return _resolve("PENNYTUNE_CACHE_DIR", _DIRS.user_cache_dir)
 
 
 def data_dir() -> Path:
