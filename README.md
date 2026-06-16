@@ -6,6 +6,8 @@
 
 **Tune out the noise.**
 
+Read this in other languages: [日本語](https://github.com/lavellehatcherjr/pennytune/blob/main/README.ja.md) | [Español](https://github.com/lavellehatcherjr/pennytune/blob/main/README.es.md) | [Français](https://github.com/lavellehatcherjr/pennytune/blob/main/README.fr.md) | [한국어](https://github.com/lavellehatcherjr/pennytune/blob/main/README.ko.md) | [中文](https://github.com/lavellehatcherjr/pennytune/blob/main/README.zh.md) | [Deutsch](https://github.com/lavellehatcherjr/pennytune/blob/main/README.de.md) | [Português](https://github.com/lavellehatcherjr/pennytune/blob/main/README.pt.md) | [Italiano](https://github.com/lavellehatcherjr/pennytune/blob/main/README.it.md)
+
 [![CI](https://github.com/lavellehatcherjr/pennytune/actions/workflows/ci.yml/badge.svg)](https://github.com/lavellehatcherjr/pennytune/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/pennytune)](https://pypi.org/project/pennytune/)
 [![Downloads](https://img.shields.io/pepy/dt/pennytune)](https://pepy.tech/project/pennytune)
@@ -18,8 +20,8 @@ Point it at the tickers you already hold or are watching and it surfaces the
 risk signals and forensic flags in each company's SEC filings -
 accounting-quality and distress scores, dilution and corporate-action risk,
 insider activity, 8-K material events, delisting-notice and active
-trading-suspension risk, and fails-to-deliver settlement context - with **every
-flag traced to the underlying filing**, so you can assess the company yourself.
+trading-suspension risk, and fails-to-deliver settlement context - **computed
+from each company's public SEC filings**, so you can assess the company yourself.
 
 It runs entirely on **public, no-account, no-API-key data**: SEC EDGAR is the
 single data source (the listed-company universe, all filings, and the
@@ -151,8 +153,8 @@ cash-burning, diluting, near delisting, or structured for manipulation. The hard
 part of due diligence is reading the filings to find those landmines. PennyTune
 does that reading for you: point it at a ticker, or rank a curated set of
 tickers you choose, and it extracts the risk signals and forensic flags
-from the company's SEC filings and **shows its work for every one** - each flag
-traced back to the filing it came from.
+from the company's SEC filings - **computed from the company's public SEC
+filings**.
 
 It surfaces **evidence, not verdicts.** It does not tell you a stock is clean or
 a landmine, does not advise buying or selling, and does not predict outcomes -
@@ -160,8 +162,8 @@ the judgment is yours.
 
 - **Free & no API keys** - runs entirely on no-account, no-key public data.
 - **SEC-registered, listed on a major US exchange (NYSE/NASDAQ/NYSE American), never OTC** - by construction.
-- **Evidence-traced** - every dilution, delisting, distress, and
-  accounting-quality flag links to the underlying filing.
+- **Evidence-based** - every signal is computed from the company's public SEC
+  filings, and for event-driven red flags the specific 8-K item is named.
 - **Transparent & tunable** - a decomposable composite score with user-editable
   weights, screening presets (`penny` default / `micro` / `small-cap-value` /
   `broad` / `custom`), and selectable strategy profiles (`hold` default /
@@ -173,7 +175,7 @@ the judgment is yours.
 ## What it surfaces
 
 For each company, PennyTune reads the SEC filings and grades the signals that
-matter most for a micro-cap - every one linked back to the filing behind it:
+matter most for a micro-cap - every one computed from the company's filings:
 
 - **Financial health & distress** - Altman Z″ solvency scoring plus a forensic
   battery (Beneish earnings-manipulation and Piotroski strength models) over the
@@ -253,7 +255,7 @@ pennytune init --identity "Your Name you@example.com" --i-understand-the-risks
 ```
 
 The primary workflow is **`inspect <TICKER>`** - point the tool at a company you
-already have and get its full, filing-traced forensic breakdown:
+already have and get its full forensic breakdown computed from the filings:
 
 ```bash
 # Full evidence-backed breakdown for one ticker (the score, decomposed):
