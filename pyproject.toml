@@ -72,7 +72,7 @@ dependencies = [
 
 [project.optional-dependencies]
 schema = ["pydantic", "tomli-w"]
-dev = ["pytest", "pytest-asyncio", "pytest-mock", "responses", "ruff", "mypy==2.1.0", "pip-audit", "build", "twine"]
+dev = ["pytest", "pytest-asyncio", "pytest-mock", "responses", "ruff", "mypy==2.3.0", "pip-audit", "build", "twine"]
 
 [project.urls]
 Homepage = "https://github.com/lavellehatcherjr/pennytune"
