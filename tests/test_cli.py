@@ -20,6 +20,9 @@ def _isolated_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PENNYTUNE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("PENNYTUNE_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("PENNYTUNE_DATA_DIR", str(tmp_path / "data"))
+    # `scan --format ...` exports to `Path.cwd() / "results"`, so the
+    # working directory has to move too or the suite writes into the repo.
+    monkeypatch.chdir(tmp_path)
 
 
 # ---- banner -----------------------------------------------------------------
@@ -534,6 +537,10 @@ class _StubDilution:
 
     def fetch_submissions(self, cik: str) -> Any:
         return self._submissions
+
+    def full_text_search(self, query: str, **kwargs: Any) -> Any:
+        # The continued-listing full-text probe; no hits in the stub universe.
+        return {"hits": {"hits": [], "total": {"value": 0}}}
 
     def get_dilution_evidence(
         self,
