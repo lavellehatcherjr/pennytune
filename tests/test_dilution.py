@@ -425,7 +425,11 @@ def test_get_dilution_evidence_assembles_inputs_and_sic() -> None:
     assert ev.inputs is not None
     assert [f.form for f in ev.inputs.filings] == ["S-3", "424B5", "424B5", "8-K"]
     assert len(ev.inputs.share_series) == 2  # from the passed companyfacts
-    assert ev.inputs.financing_texts == [EdgarDilutionProvider.TOXIC_EFTS_PHRASE]
+    # The EFTS query is a quoted phrase; the text fed to the pattern matcher is
+    # the bare phrase, so TOXIC_PATTERNS matching stays exact.
+    assert ev.inputs.financing_texts == [
+        EdgarDilutionProvider.TOXIC_EFTS_PHRASE.strip('"')
+    ]
     # the assembled inputs compute a real, flagged dilution profile
     profile = compute_dilution(ev.inputs)
     assert profile.shelf.present  # S-3 shelf
