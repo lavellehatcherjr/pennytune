@@ -23,9 +23,11 @@ resolves parameter hints at runtime; concrete ``Annotated[...]`` is most robust)
 """
 
 import json
+import sqlite3
 import sys
+import tomllib
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib import metadata
 from pathlib import Path
 from typing import Annotated, Any, cast
@@ -51,10 +53,11 @@ from pennytune.config import (
 from pennytune.disclaimer import EXPORT_HEADER, FULL_DISCLAIMER, SHORT_DISCLAIMER
 from pennytune.exit_codes import ExitCode
 from pennytune.features.delisting import DelistingInputs
-from pennytune.features.dilution import EdgarDilutionProvider
+from pennytune.features.dilution import EdgarDilutionProvider, parse_efts_hits
 from pennytune.features.events import (
     EventTape,
     build_event_tape,
+    comment_letter_activity,
     parse_submissions_8k_events,
 )
 from pennytune.features.fundamentals import (
@@ -75,7 +78,8 @@ from pennytune.profiles import get_profile
 from pennytune.providers.base import ProviderError
 from pennytune.providers.http import SafeHttpClient
 from pennytune.ratelimit import RateLimiter
-from pennytune.scan import ScanReport, ScanRequest, run_scan
+from pennytune.scan import NOT_ASSESSED_REASON, ScanReport, ScanRequest, run_scan
+from pennytune.scoring import POSITIVE_KEYS
 
 
 def _force_utf8_streams() -> None:
@@ -116,7 +120,7 @@ RISK_FLAG_AFFIRMATION = (
     "================================================================\n"
     "RISK ACKNOWLEDGMENT (--i-understand-the-risks)\n"
     "By passing --i-understand-the-risks you affirm that you have read\n"
-    "and agree to the full PennyTune disclaimer (all 12 sections): a\n"
+    "and agree to the full PennyTune disclaimer (all 14 sections): a\n"
     "research/educational tool only, NOT investment advice; penny stocks\n"
     "carry extreme risk up to TOTAL LOSS; third-party data may be\n"
     "inaccurate or delayed; verify against primary sources; use entirely\n"
@@ -124,6 +128,10 @@ RISK_FLAG_AFFIRMATION = (
     "Read the complete disclaimer any time:  pennytune disclaimer\n"
     "================================================================"
 )
+
+# Lookback for the continued-listing full-text probe. Matches the 8-K event
+# tape's own recency window so the two delisting routes agree on "recent".
+_DELISTING_FTS_DAYS = 180
 
 _CORE_DEPENDENCIES: tuple[str, ...] = (
     "pandas",
@@ -239,11 +247,18 @@ def main(
     ] = False,
     no_color: Annotated[
         bool,
-        typer.Option("--no-color", help="Disable color (honors NO_COLOR/non-TTY)."),
+        typer.Option(
+            "--no-color",
+            help="Disable color. (The NO_COLOR environment variable is not read.)",
+        ),
     ] = False,
     verbose: Annotated[
         bool,
-        typer.Option("--verbose", "-v", help="Extra diagnostics (secrets redacted)."),
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Name why each ticker failed to enrich (on stderr).",
+        ),
     ] = False,
     show_version: Annotated[
         bool,
@@ -307,9 +322,37 @@ def _interactive(state: GlobalState) -> bool:
     return sys.stdin.isatty() and not (state.yes or state.quiet)
 
 
+def _load_config(path: Path | None) -> Config:
+    """Load config, or exit 3 naming the file that could not be read.
+
+    Every caller goes through here. An unguarded ``load_config`` turns any
+    invalid config - hand edit, version skew, partial write - into a traceback
+    and exit 1, which ``exit_codes`` reserves for "results are still written".
+    Nothing recovers such a config through the CLI, so the message has to name
+    the file to fix or delete.
+    """
+    try:
+        return load_config(path)
+    # UnicodeDecodeError is a ValueError, not an OSError, so a config carrying a
+    # stray non-UTF-8 byte slips past the obvious catch tuple.
+    except (
+        ValidationError,
+        tomllib.TOMLDecodeError,
+        OSError,
+        UnicodeDecodeError,
+    ) as exc:
+        target = path or paths.config_file()
+        typer.echo(f"Cannot read config file {target}", err=True)
+        typer.echo(f"  {exc}", err=True)
+        typer.echo(
+            "Correct the file or delete it and re-run `pennytune init`.", err=True
+        )
+        raise typer.Exit(code=int(ExitCode.CONFIG_ERROR)) from None
+
+
 def _require_ready(ctx: typer.Context) -> Config:
     """Load config and refuse to scan/inspect until init is complete (exit 3)."""
-    cfg = load_config(_config_path(ctx))
+    cfg = _load_config(_config_path(ctx))
     if not cfg.edgar_identity:
         typer.echo(
             "EDGAR identity not set. Run: pennytune init --identity 'Name email'",
@@ -358,7 +401,7 @@ def init(
     _maybe_banner(state)
     typer.echo("PennyTune setup — all data is free and requires no API keys.")
     path = _config_path(ctx)
-    cfg = load_config(path)
+    cfg = _load_config(path)
 
     if identity is None:
         # Same non-interactive guard as the profile/risk steps: under
@@ -376,6 +419,11 @@ def init(
         raise typer.Exit(code=int(ExitCode.CONFIG_ERROR)) from None
     cfg.edgar_identity = identity
 
+    # Fall back to the STORED profile, never a literal. Defaulting to "hold" here
+    # turns a re-run to change an email address into a silent reset of every
+    # weight and penalty. Reading cfg.profile lets a stored "custom" reach
+    # apply_profile's `name != "custom"` guard, which is what preserves tuning.
+    stored_profile = cfg.profile
     chosen = default_profile
     if chosen is None:
         # --i-understand-the-risks marks a scripted/non-interactive run (it also
@@ -383,15 +431,20 @@ def init(
         # prompting so init never blocks on an unreadable stdin - e.g. on Windows,
         # where isatty() reports True even when no interactive input is available.
         chosen = (
-            typer.prompt("Default profile", default="hold")
+            typer.prompt("Default profile", default=stored_profile)
             if _interactive(state) and not i_understand
-            else "hold"
+            else stored_profile
         )
     try:
         apply_profile(cfg, chosen)
     except ValueError as exc:
         typer.echo(f"Invalid profile: {exc}", err=True)
         raise typer.Exit(code=int(ExitCode.USAGE_ERROR)) from None
+    # Announce a real profile change, matching what `config set profile` prints.
+    # A silent reset of the user's weights is how this goes unnoticed.
+    if chosen != stored_profile and chosen != "custom":
+        typer.echo(f"Profile {stored_profile} -> {chosen}")
+        typer.echo(f"(weights and penalties reset to the {chosen} profile)")
 
     acknowledged = i_understand
     if not acknowledged and _interactive(state):
@@ -415,7 +468,7 @@ def init(
         typer.echo(RISK_FLAG_AFFIRMATION)
     cfg.risk_acknowledged = True
 
-    saved = save_config(cfg, path)
+    saved = _save_config_or_exit(cfg, path)
     typer.echo(f"Saved config to {saved}")
     typer.echo("Run `pennytune scan` to start.")
 
@@ -434,10 +487,7 @@ class _DegradingEvidenceProvider:
     exercise the full scoring/render path offline.
     """
 
-    reason = (
-        "offline — no live data fetched; "
-        "run without --offline for live SEC data"
-    )
+    reason = "offline — no live data fetched; run without --offline for live SEC data"
 
     def gather(self, candidate: UniverseCandidate) -> scan_mod.RawEvidence:
         return scan_mod.degraded_evidence(candidate, self.reason)
@@ -475,11 +525,19 @@ def _red_flag_8k_note(tape: EventTape) -> str | None:
         parts.append(f"5.02 officer-change×{s.officer_change_count} (recent)")
     if s.covenant_or_obligation_count:
         parts.append(f"2.03/2.04 obligation×{s.covenant_or_obligation_count} (recent)")
-    auditor_restatement = tape.item_counts.get("4.01", 0) + tape.item_counts.get(
-        "4.02", 0
-    )
-    if auditor_restatement:
-        parts.append(f"4.01/4.02 auditor/restatement×{auditor_restatement} (on file)")
+    # 4.01 and 4.02 are counted separately here even though the dilution module
+    # treats either as un-gating. An auditor change is routine; a 4.02 is the
+    # issuer stating its own prior financials cannot be relied upon, and a
+    # combined count hides the difference.
+    auditor_change = tape.item_counts.get("4.01", 0)
+    if auditor_change:
+        parts.append(f"4.01 auditor-change×{auditor_change} (on file)")
+    non_reliance = tape.item_counts.get("4.02", 0)
+    if non_reliance:
+        parts.append(
+            f"4.02 non-reliance on previously issued financials×{non_reliance} "
+            "(on file)"
+        )
     return "red-flag 8-K items — " + "; ".join(parts) if parts else None
 
 
@@ -562,11 +620,36 @@ class _LiveEvidenceProvider:
         # 3.01 feeds delisting only, never dilution.
         event_tape = None
         delisting_inputs = None
+        delisting_notes: list[str] = []
         if submissions is not None:
             event_tape = build_event_tape(
                 parse_submissions_8k_events(submissions), cik=cik, now=now
             )
-            delisting_inputs = DelistingInputs(event_tape=event_tape)
+            # Item 3.01 is the tagged route, but a material minority of issuers
+            # disclose continued-listing trouble under 8.01/7.01 instead. Probe
+            # full text only when no tagged notice already fired: it saves a
+            # request on the common case and cannot double-count.
+            full_text_deficiency = False
+            if not event_tape.signals.has_delisting_notice:
+                window = (
+                    (now - timedelta(days=_DELISTING_FTS_DAYS)).date().isoformat(),
+                    now.date().isoformat(),
+                )
+                try:
+                    hits = self._dilution.full_text_search(
+                        EdgarDilutionProvider.DELISTING_EFTS_QUERY,
+                        forms=EdgarDilutionProvider.DELISTING_EFTS_FORMS,
+                        ciks=cik,
+                        dates=window,
+                    )
+                    full_text_deficiency = bool(parse_efts_hits(hits))
+                except ProviderError as exc:
+                    delisting_notes.append(
+                        f"delisting full-text scan degraded (EFTS: {exc})"
+                    )
+            delisting_inputs = DelistingInputs(
+                event_tape=event_tape, full_text_deficiency=full_text_deficiency
+            )
         dilution = self._dilution.get_dilution_evidence(
             cik,
             companyfacts=facts_json,
@@ -592,6 +675,7 @@ class _LiveEvidenceProvider:
         ftd = self._ftd.get_ftd_evidence(candidate.ticker, now=now)
         completeness = [
             *fundamentals.completeness,
+            *delisting_notes,
             *dilution.completeness,
             *insider.completeness,
             *halt.completeness,
@@ -603,6 +687,13 @@ class _LiveEvidenceProvider:
         ftd_note = _ftd_context_note(ftd)
         if ftd_note is not None:
             completeness.append(ftd_note)
+        # Staff correspondence off the submissions index already in hand. No
+        # extra request, and nothing downstream reads it: it is a line for the
+        # reader, not an input.
+        if submissions is not None:
+            letters = comment_letter_activity(submissions, now=now)
+            if letters is not None:
+                completeness.append(letters.note())
         return scan_mod.RawEvidence(
             ticker=candidate.ticker,
             sic_code=dilution.sic_code,
@@ -726,6 +817,41 @@ def _open_watchlist() -> Watchlist | None:
         return None
 
 
+def _watchlist_db_path() -> Path:
+    return paths.data_dir() / "pennytune.db"
+
+
+def _open_watchlist_or_exit() -> Watchlist:
+    """Open the watchlist DB, or exit 3 naming the file that could not be used.
+
+    Same shape as :func:`_load_config`. The ``watch`` commands are the watchlist,
+    so unlike a scan they cannot degrade past a broken database. Corrupt, locked
+    and directory-shaped db files all land here.
+    """
+    try:
+        return Watchlist()
+    except (sqlite3.Error, OSError) as exc:
+        target = _watchlist_db_path()
+        typer.echo(f"Cannot use watchlist database {target}", err=True)
+        typer.echo(f"  {exc}", err=True)
+        typer.echo(
+            "Correct the file or delete it; it is recreated on next use.", err=True
+        )
+        raise typer.Exit(code=int(ExitCode.CONFIG_ERROR)) from None
+
+
+def _save_config_or_exit(cfg: Config, path: Path | None) -> Path:
+    """Persist the config, or exit 3 naming the file that could not be written."""
+    try:
+        return save_config(cfg, path)
+    except OSError as exc:
+        target = path or paths.config_file()
+        typer.echo(f"Cannot write config file {target}", err=True)
+        typer.echo(f"  {exc}", err=True)
+        typer.echo("Check the path and its permissions, then re-run.", err=True)
+        raise typer.Exit(code=int(ExitCode.CONFIG_ERROR)) from None
+
+
 def _universe_header(report: ScanReport) -> str:
     bits = [f"preset={report.preset_name}", f"profile={report.profile_name}"]
     counts = report.universe_counts
@@ -764,6 +890,19 @@ def _render_scan(
         if report.failures:
             shown = ", ".join(ticker for ticker, _ in report.failures[:10])
             typer.echo(f"{len(report.failures)} ticker(s) failed to enrich: {shown}")
+        # A name the fetch boundary could not measure is excluded from ranking
+        # rather than scored; say so, so it is never silently dropped.
+        not_assessed = [
+            ticker
+            for ticker, reason in report.excluded_by_filter
+            if reason == NOT_ASSESSED_REASON
+        ]
+        if not_assessed:
+            shown = ", ".join(not_assessed[:10])
+            typer.echo(
+                f"{len(not_assessed)} name(s) NOT ASSESSED (no SEC evidence "
+                f"fetched; not scored, not ranked): {shown}"
+            )
         for guardrail in report.guardrails:
             typer.echo(f"  guardrail: {guardrail}")
         for attribution in report.attributions:
@@ -798,6 +937,36 @@ def _scan_json(report: ScanReport, degraded_note: str | None) -> str:
     return json.dumps(payload, indent=2, default=str)
 
 
+def _report_failure_reasons(report: ScanReport, state: GlobalState) -> None:
+    """Under --verbose, name WHY each ticker failed to enrich.
+
+    Without this the console reports only how many tickers failed, which makes a
+    total SEC outage and a mistyped ticker read identically. Goes to stderr so a
+    ``--json`` payload on stdout stays parseable. Safe to print: provider
+    exceptions carry the request URL and status, and the EDGAR identity travels
+    in the User-Agent header, never in the message.
+    """
+    if not state.verbose or not report.failures:
+        return
+    typer.echo(f"{len(report.failures)} ticker(s) failed to enrich:", err=True)
+    for ticker, reason in report.failures:
+        typer.echo(f"  {ticker}: {reason}", err=True)
+
+
+def _validate_export_format(fmt: str | None) -> None:
+    """Reject a bad --format before anything is fetched, exactly like --sort.
+
+    Validating inside ``_maybe_export`` is too late: it runs after the scan, so a
+    bad format costs a full SEC round-trip first, and its ``scanned == 0`` early
+    return skips the check entirely.
+    """
+    if fmt is not None and fmt not in _EXPORT_EXT:
+        typer.echo(
+            f"Invalid --format {fmt!r}; choose from {list(_EXPORT_EXT)}", err=True
+        )
+        raise typer.Exit(code=int(ExitCode.USAGE_ERROR))
+
+
 def _maybe_export(
     report: ScanReport, cfg: Config, state: GlobalState, fmt_override: str | None
 ) -> None:
@@ -813,9 +982,25 @@ def _maybe_export(
     out_dir = Path(cfg.output_dir) if cfg.output_dir else paths.results_dir()
     stamp = datetime.now(UTC).strftime("%Y-%m-%d_%H%M%S")
     path = out_dir / f"scan_{stamp}.{_EXPORT_EXT[fmt]}"
-    written = output.export(report.result, path, fmt, attributions=report.attributions)
+    try:
+        written = output.export(
+            report.result, path, fmt, attributions=report.attributions
+        )
+    except OSError as exc:
+        # The destination is the user's own choice (``output_dir``, else
+        # ./results), so an unwritable path is a usage problem. Exit 1 is wrong
+        # here: it promises results were written when nothing was.
+        typer.echo(f"Cannot write export to {path}", err=True)
+        typer.echo(f"  {exc}", err=True)
+        typer.echo(
+            "Set a writable directory with: pennytune config set output_dir <dir>",
+            err=True,
+        )
+        raise typer.Exit(code=int(ExitCode.USAGE_ERROR)) from None
     if not state.quiet:
-        typer.echo(f"Wrote {written}")
+        # Under --json stdout is the payload and nothing else may touch it, so
+        # the confirmation goes to stderr rather than being dropped.
+        typer.echo(f"Wrote {written}", err=state.json_output)
 
 
 _MAX_SCAN_TICKERS = 100
@@ -831,9 +1016,20 @@ def _curated_candidates(tickers: list[str] | None) -> list[UniverseCandidate]:
     if tickers:
         symbols = [t.strip().upper() for t in tickers if t.strip()]
     else:
-        wl = _open_watchlist()
-        symbols = [t for t, _ in wl.list_tickers()] if wl is not None else []
-        if wl is not None:
+        # Guarded, not best-effort: with no explicit tickers the watchlist is the
+        # input, so an unreadable database has to say so. Falling through to
+        # "the watchlist is empty" points at a different problem with a
+        # different fix.
+        wl = _open_watchlist_or_exit()
+        try:
+            symbols = [t for t, _ in wl.list_tickers()]
+        except (sqlite3.Error, OSError) as exc:
+            typer.echo(
+                f"Cannot read watchlist database {_watchlist_db_path()}", err=True
+            )
+            typer.echo(f"  {exc}", err=True)
+            raise typer.Exit(code=int(ExitCode.CONFIG_ERROR)) from None
+        finally:
             wl.close()
         if not symbols:
             typer.echo(
@@ -902,14 +1098,17 @@ def scan(
 
     Pass tickers (``pennytune scan AAA BBB``) or omit them to rank your
     watchlist; at most 100 per run. PennyTune fetches no live prices and never
-    scans the whole market - it ranks the names YOU choose. The positive quality
-    sub-scores are sector/size-relative percentiles (meaningful only across a
-    large cross-section), so on a small curated set the ranking is driven mainly
-    by the risk/penalty signals (dilution, distress, delisting, insider selling)
-    - it surfaces the riskiest names in your set.
+    scans the whole market - it ranks the names YOU choose. Positive quality
+    sub-scores are graded against fixed published anchors (the Piotroski 0-9
+    scale, the Altman Z-double-prime zones, fixed EV/Sales and revenue-growth
+    bands), so a name scores the same whichever peers share the run and scores
+    are comparable across runs. The ranking of a small curated set is still
+    driven mainly by the risk/penalty signals (dilution, distress, delisting,
+    insider selling), which is what surfaces the riskiest names in your set.
     """
     state = _state(ctx)
     cfg = _require_ready(ctx)
+    _validate_export_format(export_format)
     candidates = _curated_candidates(tickers)
     request = _resolve_scan_config(
         cfg,
@@ -937,10 +1136,14 @@ def scan(
             watchlist.close()
         _close_provider(provider)
 
+    # --json changes the shape of stdout and nothing else. The export still runs
+    # and a partial failure still exits 1; returning early here would make
+    # --format a no-op and hand a green exit code to a total SEC outage.
     if state.json_output:
         typer.echo(_scan_json(report, None))
-        return
-    _render_scan(report, state, None)
+    else:
+        _render_scan(report, state, None)
+    _report_failure_reasons(report, state)
     _maybe_export(report, cfg, state, export_format)
     if report.partial_failure:
         typer.echo(
@@ -950,6 +1153,28 @@ def scan(
 
 
 # ---- inspect ----------------------------------------------------------------
+
+
+def _exit_for_inspect(report: ScanReport, state: GlobalState) -> None:
+    """Give ``inspect`` the failure exit path it never had.
+
+    Without this a script cannot tell a real breakdown from a ticker that
+    resolved to nothing. Where the line falls:
+
+    * breakdown produced -> 0, however heavily suppressed. A NOT ASSESSED row
+      backed by a real lookup is a finding, not an error.
+    * ``--offline`` -> 0 regardless. No lookup was attempted, so "no evidence"
+      is what the flag means, and ``scan --offline`` agrees.
+    * fetch boundary raised -> 1, matching what ``scan`` returns for the same
+      ticker under the same fault. The two must not disagree.
+    * live lookup produced nothing, nothing failed -> 2. The ticker names no SEC
+      filer, which is a property of the argument, not the network.
+    """
+    if report.result.full or state.offline:
+        return
+    if report.failures:
+        raise typer.Exit(code=int(ExitCode.PARTIAL_FAILURE))
+    raise typer.Exit(code=int(ExitCode.USAGE_ERROR))
 
 
 def _render_inspect(ticker: str, report: ScanReport) -> None:
@@ -966,13 +1191,22 @@ def _render_inspect(ticker: str, report: ScanReport) -> None:
     typer.echo(
         f"{ticker}  composite {record['composite']}  sector {record['sic_sector']}"
     )
+    suppressed = set(record.get("suppressed") or ())
     typer.echo("Positive contributions:")
     for key, value in record["positive_contributions"].items():
-        typer.echo(f"  + {key:22s} {value:+.3f}")
+        # A contributor that could not be computed reads +0.000, exactly like
+        # one that was computed and came out zero. Say which it was.
+        mark = "   not computed" if key in suppressed else ""
+        typer.echo(f"  + {key:22s} {value:+.3f}{mark}")
     if record["penalty_contributions"]:
         typer.echo("Penalty overlays:")
         for key, value in record["penalty_contributions"].items():
             typer.echo(f"  - {key:22s} {value:+.3f}")
+    # A penalty that never ran contributes no key at all - identical to one
+    # that ran and found nothing. One consolidated line names the difference.
+    unchecked = sorted(suppressed - set(POSITIVE_KEYS))
+    if unchecked:
+        typer.echo(f"not checked (no data): {', '.join(unchecked)}")
     if record["na_modules"]:
         typer.echo(f"n/a for this preset: {', '.join(record['na_modules'])}")
     if record["gated"]:
@@ -994,7 +1228,10 @@ def inspect(
     """Full, evidence-backed breakdown for one ticker (the score, decomposed)."""
     state = _state(ctx)
     cfg = _require_ready(ctx)
-    symbol = ticker.upper()
+    # Strip before upper-casing, matching `_curated_candidates`. A trailing space
+    # off a copy-paste otherwise resolves to no CIK, and the user is told a real
+    # company has no SEC filings.
+    symbol = ticker.strip().upper()
     request, _filters, _preset = _resolve_scan_config(cfg, state, top=1)
     provider = _make_evidence_provider(cfg, state)
     candidate = UniverseCandidate(ticker=symbol, name=symbol)
@@ -1003,6 +1240,7 @@ def inspect(
     finally:
         _close_provider(provider)
 
+    _report_failure_reasons(report, state)
     if state.json_output:
         records = output.result_to_records(report.result)
         record: dict[str, Any] = records[0] if records else {"ticker": symbol}
@@ -1010,6 +1248,7 @@ def inspect(
         typer.echo(
             json.dumps({"_disclaimer": EXPORT_HEADER, "inspect": record}, indent=2)
         )
+        _exit_for_inspect(report, state)
         return
     # The one-line disclaimer is unconditional (matching scan), so no
     # human-readable analysis is ever emitted without it; the longer
@@ -1018,6 +1257,7 @@ def inspect(
     if not state.quiet:
         typer.echo(DUE_DILIGENCE_NOTE)
     _render_inspect(symbol, report)
+    _exit_for_inspect(report, state)
 
 
 # ---- sources ----------------------------------------------------------------
@@ -1060,7 +1300,7 @@ def config_get(
     ] = None,
 ) -> None:
     """Print configuration settings (the EDGAR email is redacted)."""
-    cfg = load_config(_config_path(ctx))
+    cfg = _load_config(_config_path(ctx))
     if key is None:
         for name, value in sorted(flatten(cfg).items()):
             shown = (
@@ -1087,7 +1327,7 @@ def config_set(
 ) -> None:
     """Set a configuration value (validates ranges; rejects unknown keys)."""
     path = _config_path(ctx)
-    cfg = load_config(path)
+    cfg = _load_config(path)
     try:
         old = get_value(cfg, key)
     except KeyError:
@@ -1098,7 +1338,7 @@ def config_set(
     except (ValueError, ValidationError) as exc:
         typer.echo(f"Invalid value for {key}: {exc}", err=True)
         raise typer.Exit(code=int(ExitCode.USAGE_ERROR)) from None
-    save_config(cfg, path)
+    _save_config_or_exit(cfg, path)
     new = get_value(cfg, key)
     typer.echo(f"Updated {key}: {old} -> {new}")
     if key == "profile" and value != "custom":
@@ -1121,7 +1361,7 @@ def watch_add(
     tickers: Annotated[list[str], typer.Argument(help="Tickers to add.")],
 ) -> None:
     """Add tickers to the watchlist."""
-    wl = Watchlist()
+    wl = _open_watchlist_or_exit()
     try:
         added = wl.add(tickers)
         typer.echo(f"Added {len(added)} tickers. Watchlist: {len(wl.list_tickers())}.")
@@ -1132,7 +1372,7 @@ def watch_add(
 @watch_app.command("list")
 def watch_list(ctx: typer.Context) -> None:
     """List watched tickers with last score, delta, and open alerts."""
-    wl = Watchlist()
+    wl = _open_watchlist_or_exit()
     try:
         entries = wl.list_entries()
         if not entries:
@@ -1155,7 +1395,7 @@ def watch_rm(
     tickers: Annotated[list[str], typer.Argument(help="Tickers to remove.")],
 ) -> None:
     """Remove tickers from the watchlist."""
-    wl = Watchlist()
+    wl = _open_watchlist_or_exit()
     try:
         removed = wl.remove(tickers)
         typer.echo(
