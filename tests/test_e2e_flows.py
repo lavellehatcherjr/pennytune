@@ -32,6 +32,9 @@ def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PENNYTUNE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("PENNYTUNE_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("PENNYTUNE_DATA_DIR", str(tmp_path / "data"))
+    # `scan --format ...` exports to `Path.cwd() / "results"`, so the
+    # working directory has to move too or the suite writes into the repo.
+    monkeypatch.chdir(tmp_path)
 
 
 # ---- shared fixtures --------------------------------------------------------
@@ -100,10 +103,11 @@ def _evidence(
 # the only differentiators are valuation (favors VALU) and sentiment (favors
 # SENT) - so trader ranks SENT first, hold ranks VALU first (a real flip).
 _MAPPING = {
-    "SENT": _evidence(
-        "SENT", cap=120_000_000.0, growth=0.20, sentiment=0.95, delisting=True
-    ),
-    "VALU": _evidence("VALU", cap=60_000_000.0, growth=0.20, sentiment=-0.80),
+    "SENT": _evidence("SENT", cap=5_600.0, growth=0.20, sentiment=0.95, delisting=True),
+    # Caps are on the same scale as the period's revenue (900) so EV/Sales is a
+    # realistic multiple: positive sub-scores are absolute anchors now, so
+    # magnitude matters, not just the relative order.
+    "VALU": _evidence("VALU", cap=2_000.0, growth=0.20, sentiment=-0.80),
 }
 
 
@@ -174,12 +178,14 @@ def test_flow_core_research_loop(
     assert "composite" in inspect.output.lower()
 
     # Reproducible: the same fixtures + weights → the same JSON ranking.
+    # Read stdout, not the merged stream: --json puts the payload on stdout and
+    # the export confirmation on stderr, and CliRunner's .output merges them.
     first = runner.invoke(
         app, ["--config", str(cfg), "--json", "scan", "SENT", "VALU"]
-    ).output
+    ).stdout
     second = runner.invoke(
         app, ["--config", str(cfg), "--json", "scan", "SENT", "VALU"]
-    ).output
+    ).stdout
     order1 = [r["ticker"] for r in json.loads(first)["results"]]
     order2 = [r["ticker"] for r in json.loads(second)["results"]]
     assert order1 == order2
@@ -270,7 +276,7 @@ def test_flow_profile_switching(
                 "SENT",
                 "VALU",
             ],
-        ).output
+        ).stdout
         return [r["ticker"] for r in json.loads(out)["results"]]
 
     trader = _order("trader")
@@ -298,7 +304,7 @@ def test_flow_config_cache_sources(
     payload = json.loads(
         runner.invoke(
             app, ["--config", str(cfg), "--json", "scan", "SENT", "VALU"]
-        ).output
+        ).stdout
     )
     # valuation weight 3.0 lifts the cheap name's valuation contribution.
     valu = next(r for r in payload["results"] if r["ticker"] == "VALU")
@@ -346,7 +352,7 @@ def test_flow_machine_readable_and_banner(
     # --json is clean and parses; no banner/decoration leaks in.
     out = runner.invoke(
         app, ["--config", str(cfg), "--json", "scan", "SENT", "VALU"]
-    ).output
+    ).stdout
     payload = json.loads(out)  # must parse
     assert "Tune out the noise." not in out  # banner never in machine output
     assert payload["results"]
