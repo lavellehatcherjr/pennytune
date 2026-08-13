@@ -1,12 +1,12 @@
-"""Output & export - how ranked results leave the tool.
+"""Output and export.
 
-How results leave the tool: a colored, glyph-annotated Rich console table; the
-full ranked set exported to CSV/Parquet/JSON/Markdown; and a clean
-machine-readable JSON mode for piping. The short-form disclaimer ends every
-ranked console output, and the one-line disclaimer header travels inside every
-exported file (in Parquet via schema metadata). Color always reinforces a
-glyph ([X]/[!]/[+]/[~]) - never the sole signal - and is removed under
-``--no-color`` / ``NO_COLOR`` / non-TTY.
+A colored, glyph-annotated Rich console table; the full ranked set exported to
+CSV/Parquet/JSON/Markdown; and a clean machine-readable JSON mode for piping.
+The short-form disclaimer ends every ranked console output, and the one-line
+disclaimer header travels inside every exported file (in Parquet via schema
+metadata). Color always reinforces a glyph ([X]/[!]/[+]/[~]) and is never the
+sole signal; it is removed under ``--no-color``. The ``NO_COLOR`` environment
+variable is not read.
 """
 
 from __future__ import annotations
@@ -52,6 +52,19 @@ def result_to_records(result: RankedResult) -> list[dict[str, Any]]:
                 "gate_reasons": list(breakdown.gate_reasons),
                 "penalty_flags": sorted(breakdown.penalty_contributions),
                 "na_modules": list(breakdown.na_modules),
+                # Which checks never ran for this name, and a glanceable
+                # boolean so a spreadsheet reader does not have to parse prose
+                # to see that a row rests on partial evidence.
+                "suppressed": list(breakdown.suppressed),
+                # The count is the field to sort and filter on: on a real scan
+                # the boolean is False for ~90% of names, so it separates almost
+                # nothing, while 2-unchecked versus 5-unchecked is actionable.
+                # The boolean stays because "is this row complete at all" is a
+                # different question from "how incomplete", and a spreadsheet
+                # filter on TRUE/FALSE is cheaper than a numeric predicate.
+                "suppressed_count": len(breakdown.suppressed),
+                "evidence_complete": not breakdown.suppressed,
+                "completeness": list(breakdown.completeness),
                 "positive_contributions": {
                     k: round(v, 4) for k, v in breakdown.positive_contributions.items()
                 },
@@ -85,11 +98,16 @@ def _flag_glyph(breakdown: ScoreBreakdown) -> tuple[str, str]:
     if breakdown.gated:
         return f"[X] excluded: {'; '.join(breakdown.gate_reasons)}", "red"
     penalties = set(breakdown.penalty_contributions)
+    # A trailing coverage marker: without it two rows whose modules were all
+    # clean and all UNCHECKED render identically as "-".
+    unchecked = (
+        f" ~{len(breakdown.suppressed)} unchecked" if breakdown.suppressed else ""
+    )
     if penalties & _CRITICAL_MODULES:
-        return f"[X] {', '.join(sorted(penalties))}", "red"
+        return f"[X] {', '.join(sorted(penalties))}{unchecked}", "red"
     if penalties:
-        return f"[!] {', '.join(sorted(penalties))}", "yellow"
-    return "-", ""
+        return f"[!] {', '.join(sorted(penalties))}{unchecked}", "yellow"
+    return (f"-{unchecked}" if unchecked else "-"), ("yellow" if unchecked else "")
 
 
 def render_console(
