@@ -1,4 +1,4 @@
-"""Universe-preset tests. A preset is now a per-tier risk-weight bundle only."""
+"""Universe-preset tests. A preset is a per-tier risk-weight bundle, nothing more."""
 
 import pytest
 
@@ -21,7 +21,7 @@ def test_all_presets_present() -> None:
 
 
 def test_presets_carry_no_price_or_size_band() -> None:
-    # Presets no longer filter by price/cap/EV; they only tune risk weights.
+    # Presets carry no price/cap/EV band; they only tune risk weights.
     for preset in PRESETS.values():
         for banned in ("price_min", "price_max", "cap_min", "cap_max", "ev_min"):
             assert not hasattr(preset, banned)
