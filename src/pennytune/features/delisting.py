@@ -67,6 +67,11 @@ _TIER_RANK = {"none": 0, "watch": 1, "deficiency": 2, "imminent": 3, "determinat
 class DelistingInputs:
     current_price: float | None = None  # current-price context only (not a day-count)
     deficiency_notice: bool = False  # disclosed 8-K 3.01 / press release
+    # Continued-listing language found by full-text search in a recent 8-K that
+    # carries no Item 3.01 tag. Softer evidence than a tagged notice: the same
+    # phrases appear in filings announcing compliance was regained, so this
+    # raises "watch", never "deficiency", and never the hard gate.
+    full_text_deficiency: bool = False
     determination_disclosed: bool = (
         False  # disclosed Staff Delisting Determination / suspension
     )
@@ -119,6 +124,21 @@ def compute_delisting(inputs: DelistingInputs) -> DelistingProfile:
         notes.append(NASDAQ_MIN_BID_RULE)
         if inputs.disclosed_timeline:
             evidence.append(f"company-disclosed timeline: {inputs.disclosed_timeline}")
+
+    # Full-text fallback: real issuers routinely disclose continued-listing
+    # trouble under Item 8.01/7.01 instead of 3.01, and depending on the phrase
+    # somewhere between a fifth and a half of listing-language 8-Ks carry no
+    # 3.01 tag at all. Raises "watch" only, and only when no tagged notice
+    # already fired, because the same phrases occur in "we regained compliance"
+    # announcements. Per DAY_COUNT_CAVEAT, no attempt to place the issuer on the
+    # cure clock.
+    if inputs.full_text_deficiency and not deficiency:
+        flags.append("DELISTING-LANGUAGE")
+        tiers.append("watch")
+        evidence.append(
+            "continued-listing language in a recent 8-K carrying no Item 3.01 "
+            "(full-text match; cure status not tracked)"
+        )
 
     if inputs.going_concern:
         flags.append("GOING-CONCERN")
