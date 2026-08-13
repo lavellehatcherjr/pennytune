@@ -2,6 +2,10 @@
 
 The CLI is meant to be scriptable, so these codes are part of the public
 contract and must not change meaning between releases.
+
+NOT CURRENTLY PRODUCED: ``NO_NETWORK_NO_CACHE`` and ``INTERRUPTED`` are reserved
+but no code path returns them. A total network failure exits ``PARTIAL_FAILURE``,
+and an interrupt exits 130 from the runtime rather than 5.
 """
 
 from __future__ import annotations
