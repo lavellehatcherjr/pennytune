@@ -11,11 +11,19 @@ Wires every feature into the complete funnel:
   settlement-stress context, SEC trading-suspension status). One ticker failing
   never aborts the scan; a provider being down degrades to flagged,
   lower-completeness evidence rather than failing.
-* **Compute every signal.** The pure fundamentals, dilution-risk, delisting,
-  suspension, insider, and forensic scoring functions run over the evidence;
-  valuation/growth/fundamental-momentum/financial-health are scored as
-  **sector- and size-relative percentiles**, never absolute cutoffs. (No price
-  technicals - no price history is fetched or used beyond the snapshot.)
+* **Compute what the evidence supports.** The pure fundamentals, dilution-risk,
+  delisting, suspension, insider, and forensic scoring functions run over the
+  evidence; a function whose inputs are missing returns ``None`` and is
+  SUPPRESSED by the caller rather than contributing a zero. Meanwhile
+  valuation/growth/fundamental-momentum/financial-health are scored against
+  **absolute published anchors** (Piotroski's 0-9 scale, the Altman Z''
+  zones, fixed EV/Sales and revenue-growth bands). They are NOT peer
+  percentiles: PennyTune scans at most 100 curated names, so peer groups were
+  routinely of size 1, where a percentile is a constant and carries no
+  information. (No price technicals - no price history is fetched or used.)
+* **Gate on evidence.** A candidate for which no measurement of any kind could
+  be fetched is reported as *not assessed* and excluded from ranking, never
+  scored. Absence of evidence is not evidence of safety.
 * **Score, gate, rank.** Signals are assembled into
   :class:`scoring.ScoreInputs` with **preset-aware penalty weighting** and the
   two hard gates, then ranked; fails-to-deliver are **context only**,
@@ -28,6 +36,7 @@ network calls (the provider reads only cache).
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -62,15 +71,16 @@ from pennytune.features.quant_scores import (
     PeriodFinancials,
     ScoreResult,
     altman_z,
+    altman_zone,
     beneish_m,
     ev_valuation,
     is_financials_sic,
     piotroski_f,
-    sector_size_percentiles,
     up_market_modules,
 )
 from pennytune.features.short_interest import FtdContext
 from pennytune.features.universe import UNIVERSE_NOTE, UniverseCandidate
+from pennytune.features.watchlist import snapshot_flags
 from pennytune.freshness import FreshnessReport
 from pennytune.scoring import (
     Gates,
@@ -79,9 +89,12 @@ from pennytune.scoring import (
     RankedResult,
     ScoreBreakdown,
     ScoreInputs,
-    percentile_to_subscore,
+    financial_health_subscore,
+    growth_subscore,
+    piotroski_subscore,
     rank_candidates,
     score_candidate,
+    valuation_subscore,
 )
 
 if TYPE_CHECKING:
@@ -130,19 +143,8 @@ _DELIST_TIER: dict[str, float] = {
 _HALT_TIER: dict[str, float] = {"none": 0.0, "suspended": 1.0}
 _CONF_SCALE: dict[str, float] = {"low": 0.5, "medium": 0.75, "high": 1.0}
 
-# Metric → whether a higher raw value is "better" for the positive sub-score.
-_POSITIVE_METRICS: dict[str, bool] = {
-    "ev_to_sales": False,  # cheaper (lower EV/Sales) = higher valuation sub-score
-    "revenue_growth": True,
-    "piotroski": True,
-    "altman_z": True,
-}
-_METRIC_TO_SUBSCORE: dict[str, str] = {
-    "ev_to_sales": "valuation",
-    "revenue_growth": "growth",
-    "piotroski": "fundamental_momentum",
-    "altman_z": "fin_health",
-}
+# Exclusion reason for a name the fetch boundary could not measure at all.
+NOT_ASSESSED_REASON = "not assessed (no SEC evidence could be fetched)"
 
 
 # ---- evidence + computed-signal containers ----------------------------------
@@ -197,7 +199,13 @@ class ComputedSignals:
     piotroski: float | None = None
     altman_z: float | None = None
     sentiment_subscore: float | None = None
-    insider_subscore: float = 0.0
+    # None = no insider inputs were fetched at all → suppressed, never imputed.
+    # (Suppression keys off INPUT emptiness, not a neutral/low OUTPUT: a real
+    # filer can legitimately score neutral/low and must keep its credit.)
+    insider_subscore: float | None = None
+    # False = the fetch boundary produced no measurement of any kind for this
+    # name, so it must not be ranked against names that were actually assessed.
+    assessed: bool = False
     # Feature profiles / scores retained for penalties, gates, and evidence.
     dilution: DilutionProfile | None = None
     manipulation: ManipulationProfile | None = None
@@ -287,7 +295,14 @@ class ScanReport:
 
 
 def size_bucket(market_cap: float | None) -> str:
-    """Coarse size bucket for sector/size-relative percentiles."""
+    """Coarse size bucket.
+
+    INERT: nothing on the scoring path reads it. It was the size axis of the
+    sector/size percentiles, which the absolute anchors replaced. It is also
+    always ``"unknown"`` in practice: nothing fetches a market cap, so the
+    argument is always ``None``. Retained because it is recorded on the
+    computed signals and is correct if a market-cap source is ever added.
+    """
     if market_cap is None:
         return "unknown"
     if market_cap < 50_000_000:
@@ -316,9 +331,13 @@ def degraded_evidence(candidate: UniverseCandidate, reason: str) -> RawEvidence:
 
 
 def _altman_zone(z: float | None) -> str | None:
-    if z is None:
-        return None
-    return "distress" if z < 1.1 else "safe" if z > 2.6 else "grey"
+    """Solvency zone, delegating to the single re-anchored definition.
+
+    A thin wrapper so the cutoffs live in exactly one place. A second copy here
+    lets the distress penalty and the ``zone:`` flag disagree about the same
+    company.
+    """
+    return altman_zone(z)
 
 
 def _insider_subscore(profile: InsiderProfile) -> float:
@@ -327,6 +346,38 @@ def _insider_subscore(profile: InsiderProfile) -> float:
     if profile.cluster_buy:
         base = max(base, 0.8)
     return round(base * _CONF_SCALE.get(profile.confidence, 0.5), 4)
+
+
+def _has_insider_inputs(evidence: RawEvidence) -> bool:
+    """True when the fetch boundary returned any ownership filing to reason from."""
+    return bool(
+        evidence.insider_transactions
+        or evidence.form144s
+        or evidence.ownership_filings
+        or evidence.institutional
+    )
+
+
+def _is_assessed(evidence: RawEvidence) -> bool:
+    """True when at least one real measurement was fetched for this name.
+
+    A name for which every source came back empty has not been assessed; it has
+    merely been *named*. Scoring it produces a number that looks like a verdict
+    and competes with names whose risk was actually measured, so the caller
+    excludes it from ranking instead (never a silent pass).
+    """
+    return any(
+        (
+            evidence.period_t is not None,
+            evidence.revenue_growth is not None,
+            evidence.dilution is not None,
+            evidence.delisting is not None,
+            evidence.halt is not None,
+            evidence.event_tape is not None,
+            evidence.ftd is not None,
+            _has_insider_inputs(evidence),
+        )
+    )
 
 
 def compute_signals(evidence: RawEvidence, *, no_news: bool) -> ComputedSignals:
@@ -386,6 +437,14 @@ def compute_signals(evidence: RawEvidence, *, no_news: bool) -> ComputedSignals:
         ownership_filings=evidence.ownership_filings,
         institutional=evidence.institutional,
     )
+    # Suppress-not-impute: no ownership filings means nothing to read conviction
+    # from. Defaulting to neutral would pay a company credit for having no
+    # insider record at all.
+    insider_value: float | None = None
+    if _has_insider_inputs(evidence):
+        insider_value = _insider_subscore(insider)
+    else:
+        completeness.append("insider suppressed (no ownership filings)")
 
     return ComputedSignals(
         ticker=evidence.ticker,
@@ -396,7 +455,8 @@ def compute_signals(evidence: RawEvidence, *, no_news: bool) -> ComputedSignals:
         piotroski=piotroski_value,
         altman_z=altman_value,
         sentiment_subscore=sentiment_subscore,
-        insider_subscore=_insider_subscore(insider),
+        insider_subscore=insider_value,
+        assessed=_is_assessed(evidence),
         dilution=dilution,
         manipulation=manipulation,
         delisting=delisting,
@@ -416,53 +476,30 @@ def compute_signals(evidence: RawEvidence, *, no_news: bool) -> ComputedSignals:
     )
 
 
-def _percentiles(signals: Sequence[ComputedSignals]) -> dict[str, dict[str, float]]:
-    """Sector/size-relative percentile of each positive metric (NaN = absent)."""
-    out: dict[str, dict[str, float]] = {s.ticker: {} for s in signals}
-    if not signals:
-        return out
-    import pandas as pd
+def _positive_subscores(signals: ComputedSignals) -> PositiveSubScores:
+    """Map computed metrics to [0, 1] positive sub-scores via absolute anchors.
 
-    frame = pd.DataFrame(
-        [
-            {
-                "ticker": s.ticker,
-                "sic_sector": s.sic_sector or "?",
-                "size_bucket": s.size_bucket or "?",
-                "ev_to_sales": s.ev_to_sales,
-                "revenue_growth": s.revenue_growth,
-                "piotroski": s.piotroski,
-                "altman_z": s.altman_z,
-            }
-            for s in signals
-        ]
-    )
-    for metric in _POSITIVE_METRICS:
-        ranked = sector_size_percentiles(frame, metric)
-        for position, ticker in enumerate(frame["ticker"]):
-            value = ranked.iloc[position]
-            if pd.notna(value):
-                out[str(ticker)][metric] = float(value)
-    return out
-
-
-def _positive_subscores(
-    signals: ComputedSignals, percentiles: dict[str, float]
-) -> PositiveSubScores:
-    """Map percentiles + direct signals to [0, 1] positive sub-scores."""
+    Suppression is expressed by NOT ASSIGNING: ``PositiveSubScores`` stays
+    all-float (the renderer and the composite both format it), so a metric that
+    could not be computed simply never reaches its field.
+    """
     positives = PositiveSubScores()
-    for metric, higher_better in _POSITIVE_METRICS.items():
-        if metric in percentiles:
-            setattr(
-                positives,
-                _METRIC_TO_SUBSCORE[metric],
-                percentile_to_subscore(
-                    percentiles[metric], higher_is_better=higher_better
-                ),
-            )
+    if signals.ev_to_sales is not None:
+        positives.valuation = valuation_subscore(signals.ev_to_sales)
+    if signals.revenue_growth is not None:
+        positives.growth = growth_subscore(signals.revenue_growth)
+    if signals.piotroski is not None:
+        positives.fundamental_momentum = piotroski_subscore(signals.piotroski)
+    # fin_health and the `distress` penalty read the same Altman number, so they
+    # have to share one definition. Score them independently and a distress-zone
+    # name can take full health credit and a distress penalty at once.
+    fin_health = financial_health_subscore(signals.altman_z)
+    if fin_health is not None:
+        positives.fin_health = fin_health
     if signals.sentiment_subscore is not None:
         positives.sentiment = signals.sentiment_subscore
-    positives.insider = signals.insider_subscore
+    if signals.insider_subscore is not None:
+        positives.insider = signals.insider_subscore
     return positives
 
 
@@ -495,9 +532,19 @@ def _penalties(signals: ComputedSignals) -> dict[str, Penalty]:
             )
 
     if signals.distress_zone in ("distress", "grey"):
-        sev = 1.0 if signals.distress_zone == "distress" else 0.5
+        # Both zones carry a charge, but they are not the same finding and must
+        # not share a label. "distress" is in CRITICAL_PENALTY_MODULES, so keying
+        # the grey zone there paints a red [X] on every company below the safe
+        # threshold - which, once the XBRL derivations made Altman computable for
+        # large filers, meant Starbucks, HP, AbbVie, Amgen, Oracle, Duke Energy
+        # and AT&T. Against going-concern language in filers' own 10-Ks, every
+        # genuine detection comes from the distress zone and grey-zone names are
+        # healthy, so splitting the label costs no detection and roughly thirds
+        # the critical flag's false-positive rate.
+        distressed = signals.distress_zone == "distress"
         conf = 0.5 if signals.out_of_model else 1.0
-        penalties["distress"] = Penalty(severity=sev, confidence=conf)
+        key = "distress" if distressed else "solvency_watch"
+        penalties[key] = Penalty(severity=1.0 if distressed else 0.5, confidence=conf)
     if signals.beneish_flag and signals.beneish_m is not None:
         sev = min(1.0, 0.5 + max(0.0, signals.beneish_m - _BENEISH_FLAG) * 0.3)
         conf = 0.5 if signals.out_of_model else 1.0
@@ -543,15 +590,45 @@ def _gates(signals: ComputedSignals) -> Gates:
     )
 
 
-def _to_score_inputs(
-    signals: ComputedSignals, percentiles: dict[str, float]
-) -> ScoreInputs:
+# Modules whose absence is INFORMATIVE about this particular name, mapped to
+# the ComputedSignals field that must be non-None for the module to have run.
+# Deliberately excludes valuation, sentiment and manipulation: those have no
+# data source for ANY filer, so listing them would mark every row degraded and
+# destroy the signal. Their absence is still stated in the completeness notes.
+_COVERAGE_MODULES: tuple[tuple[str, str], ...] = (
+    ("growth", "revenue_growth"),
+    ("fundamental_momentum", "piotroski"),
+    ("fin_health", "altman_z"),
+    ("distress", "distress_zone"),
+    ("beneish", "beneish_m"),
+    ("dilution", "dilution"),
+    ("delisting", "delisting"),
+    ("halt_suspension", "halt"),
+)
+
+
+def _suppressed_modules(signals: ComputedSignals) -> list[str]:
+    """Modules that could not be computed for this name (never ran).
+
+    A penalty that ran and found nothing contributes no key to
+    ``penalty_contributions`` - and so does a penalty that never ran at all.
+    Recording the second case is what makes them distinguishable downstream.
+    """
+    return [
+        module
+        for module, attribute in _COVERAGE_MODULES
+        if getattr(signals, attribute) is None
+    ]
+
+
+def _to_score_inputs(signals: ComputedSignals) -> ScoreInputs:
     return ScoreInputs(
         ticker=signals.ticker,
         sic_sector=signals.sic_sector,
-        positives=_positive_subscores(signals, percentiles),
+        positives=_positive_subscores(signals),
         penalties=_penalties(signals),
         gates=_gates(signals),
+        suppressed=_suppressed_modules(signals),
     )
 
 
@@ -642,25 +719,31 @@ def run_scan(
         except Exception as exc:  # provider-level per-ticker failure (counted)
             failures.append((candidate.ticker, str(exc)))
 
-    # compute every signal, then cross-sectional percentiles.
+    # compute every signal.
     signals = [compute_signals(ev, no_news=request.no_news) for ev in gathered]
-    percentiles = _percentiles(signals)
     signals_by_ticker = {s.ticker: s for s in signals}
 
     # score, apply the filter flags, gate, and rank.
     breakdowns: list[ScoreBreakdown] = []
     excluded: list[tuple[str, str]] = []
     for sig in signals:
+        # Evidence gate: a name with no measurement of any kind is reported as
+        # not assessed rather than scored. Ranking it would put a number that
+        # reflects only missing data alongside names whose risk was measured.
+        if not sig.assessed:
+            excluded.append((sig.ticker, NOT_ASSESSED_REASON))
+            continue
         reason = _filter_reason(sig, request)
         if reason is not None:
             excluded.append((sig.ticker, reason))
             continue
         breakdown = score_candidate(
-            _to_score_inputs(sig, percentiles.get(sig.ticker, {})),
+            _to_score_inputs(sig),
             positive_weights=request.positive_weights,
             penalty_magnitudes=request.penalty_magnitudes,
             preset_bundle=request.preset_bundle,
         )
+        breakdown.completeness = list(sig.completeness)
         if request.exclude_flagged and _is_flagged(breakdown):
             excluded.append((sig.ticker, "critical flag (--exclude-flagged)"))
             continue
@@ -682,13 +765,35 @@ def run_scan(
 
     watchlist_alerts: list[str] = []
     if watchlist is not None:
-        for breakdown in result.full:
-            if watchlist.is_watched(breakdown.ticker):
-                flags = sorted(breakdown.penalty_contributions) + breakdown.gate_reasons
-                watchlist.record_snapshot(
-                    breakdown.ticker, breakdown.composite, flags, now=now
-                )
-        watchlist_alerts = watchlist.alerts()
+        # Best-effort by policy (see cli._open_watchlist): a watchlist that
+        # breaks mid-scan must not cost the user the scan they just paid for.
+        try:
+            for breakdown in result.full:
+                if watchlist.is_watched(breakdown.ticker):
+                    watched = signals_by_ticker.get(breakdown.ticker)
+                    feature_flags: list[str] = []
+                    if watched is not None:
+                        for profile in (
+                            watched.dilution,
+                            watched.delisting,
+                            watched.halt,
+                            watched.manipulation,
+                        ):
+                            if profile is not None:
+                                feature_flags.extend(profile.flags)
+                    watchlist.record_snapshot(
+                        breakdown.ticker,
+                        breakdown.composite,
+                        snapshot_flags(
+                            breakdown.penalty_contributions,
+                            breakdown.gate_reasons,
+                            feature_flags,
+                        ),
+                        now=now,
+                    )
+            watchlist_alerts = watchlist.alerts()
+        except (sqlite3.Error, OSError):
+            watchlist_alerts = []
 
     completeness = {
         ticker: sig.completeness
