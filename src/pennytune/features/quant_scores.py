@@ -4,10 +4,10 @@ Pure pandas/numpy math on the EDGAR financial-statement line items the
 fundamentals pipeline already pulls (plus market cap from the profile feed).
 No new data sources. The scan/inspect composite consumes Altman Z″ (with the
 Altman→bond-rating mapping), Beneish M (+ 8 sub-indices), Piotroski F, EV/FCF
-valuation (tier-safe), the up-market risk modules, and sector/size-relative
-percentiles. Dechow F (Model 1), Montier C, Sloan accruals, and
-cash-runway/financing-cliff are implemented and unit-tested but not wired into
-the composite.
+valuation (tier-safe) and the up-market risk modules. Dechow F (Model 1),
+Montier C, Sloan accruals, cash-runway/financing-cliff and the sector/size
+percentile ranking are implemented and unit-tested but not wired into the
+composite: positive contributors are graded against fixed anchors instead.
 
 SUPPRESS, DO NOT IMPUTE: when a required input is missing/zero/invalid the
 affected score is suppressed and marked incomplete - never computed with zeros
@@ -34,6 +34,7 @@ __all__ = [
     "ScoreResult",
     "MODELS_CAVEAT",
     "altman_z",
+    "altman_zone",
     "altman_bre",
     "beneish_m",
     "dechow_f",
@@ -170,6 +171,36 @@ def altman_bre(z_double_prime: float) -> tuple[str, str]:
     return "D", "default"
 
 
+# Altman Z'' zone cutoffs. Deliberately NOT Altman's published 1.1 / 2.6 bands.
+#
+# Z'' separates distressed from healthy filers well as a continuous number
+# (AUC ~0.95 against going-concern language in the filer's own 10-K), but the
+# published boundary sits at roughly the 45th percentile of the real US filer
+# distribution, so it calls about half the market distressed. Holding it there
+# misses no going-concern filer and costs a ~31% false-distress rate on names
+# like Starbucks, HP, AbbVie, Amgen, Oracle, Lowe's, Duke Energy and AT&T, all
+# of which file clean 10-Ks.
+#
+# -3.0 and 1.0 are the round numbers nearest the separation optimum. They cut
+# false distress to ~12%, still call no going-concern filer safe, and clear the
+# large caps out of the distress band entirely.
+#
+# The BRE/PD bond-rating flags below still use Altman's published EMS scale and
+# will therefore disagree with these zones. They are informational, not scored.
+DISTRESS_ZONE_MAX = -3.0  # z below this = distress
+SAFE_ZONE_MIN = 1.0  # z above this = safe
+_X4_APPLICABILITY_LIMIT = 4.0
+
+
+def altman_zone(z: float | None) -> str | None:
+    """Solvency zone for a Z'' value, on this tool's re-anchored cutoffs."""
+    if z is None:
+        return None
+    return (
+        "distress" if z < DISTRESS_ZONE_MAX else "safe" if z > SAFE_ZONE_MIN else "grey"
+    )
+
+
 def altman_z(period: PeriodFinancials) -> ScoreResult:
     """Altman Z''-Score (non-manufacturer): zones + BRE/PD (secondary flags)."""
     missing = _missing(
@@ -196,13 +227,64 @@ def altman_z(period: PeriodFinancials) -> ScoreResult:
     x3 = period.ebit / period.total_assets
     x4 = period.book_equity / period.total_liabilities
     z = 6.56 * x1 + 3.26 * x2 + 6.72 * x3 + 1.05 * x4
-    zone = "distress" if z < 1.1 else "safe" if z > 2.6 else "grey"
+    zone = altman_zone(z)
+    components = {"X1_WC_TA": x1, "X2_RE_TA": x2, "X3_EBIT_TA": x3, "X4_BE_TL": x4}
+
+    # Applicability gate (suppress-not-impute). X4 = book equity / total
+    # liabilities is unbounded as liabilities approach zero and carries a
+    # positive coefficient, so a loss-making shell that has just raised capital
+    # and holds almost no liabilities scores "safe" on that one term alone. On
+    # such a filer X4 can supply 97% of the total, where $100k of liabilities -
+    # a rounding item - swings Z'' by more than the width of the whole grey band.
+    #
+    # Altman fitted the model on leveraged operating firms. This balance-sheet
+    # shape is outside the fitted region, so the number is an extrapolation and
+    # is withheld rather than reported or quietly capped. Capping does not work:
+    # a bound loose enough to leave healthy filers alone changes no verdict, and
+    # one tight enough to matter rewrites an input for roughly a third of
+    # filers, profitable large caps included.
+    #
+    # All four clauses must hold, which is what protects the controls:
+    #   X4 > 4.0  - above this the term alone exceeds the "safe" cutoff (1.05 x
+    #               4.0 = 4.2 > 2.6) regardless of the other three.
+    #   X2 < 0    - equity was contributed, not earned (accumulated deficit).
+    #   X3 <= 0   - currently loss-making.
+    #   z >= 1.1  - X4 can only inflate Z''; a filer still in the distress zone
+    #               despite an inflated X4 is distressed a fortiori, so that
+    #               verdict is kept.
+    # The last clause asks whether the balance sheet still looks distressed
+    # once the inflating term is removed. Comparing the FULL score against the
+    # distress cutoff was equivalent while that cutoff sat at 1.1, but with the
+    # re-anchored bands it would suppress genuinely distressed filers whose Z''
+    # is only non-distressed BECAUSE X4 inflated it. Subtracting the X4
+    # contribution (its published coefficient times the ratio, leaving the
+    # coefficients themselves untouched) states the intent directly.
+    z_without_x4 = z - 1.05 * x4
+    if (
+        x4 > _X4_APPLICABILITY_LIMIT
+        and x2 < 0
+        and x3 <= 0
+        and z_without_x4 >= DISTRESS_ZONE_MAX
+    ):
+        return ScoreResult(
+            "altman_z",
+            components=components,
+            missing=["applicability:X4_BE_TL"],
+            note=(
+                f"Altman Z'' suppressed: equity/liabilities = {x4:.1f} supplies "
+                f"{100 * 1.05 * x4 / z:.0f}% of the score on liabilities of "
+                f"{100 * period.total_liabilities / period.total_assets:.1f}% of "
+                "assets, with an accumulated deficit and negative EBIT - outside "
+                "the model's fitted region"
+            ),
+        )
+
     rating, pd_tier = altman_bre(z)
     return ScoreResult(
         "altman_z",
         value=z,
         computable=True,
-        components={"X1_WC_TA": x1, "X2_RE_TA": x2, "X3_EBIT_TA": x3, "X4_BE_TL": x4},
+        components=components,
         flags=[f"zone:{zone}", f"BRE:{rating}", f"PD:{pd_tier}"],
         note=MODELS_CAVEAT,
     )
@@ -754,7 +836,10 @@ def sector_size_percentiles(
 ) -> pd.Series:
     """Percentile rank of ``value_col`` within each (SIC sector, size bucket) group.
 
-    "Cheap"/"strong" is sector- and size-defined, so absolute multiples are not
-    comparable across the band - the percentile is the honest comparison.
+    Off the scoring path, kept as a general utility. The argument for it is that
+    "cheap" and "strong" are sector- and size-defined, so a percentile is the
+    honest comparison, but that only holds across a large cross-section. A scan
+    covers at most 100 curated names, where groups of size 1 make every rank
+    1.0. Positive sub-scores come from the absolute anchors in ``scoring``.
     """
     return frame.groupby([sector_col, size_col])[value_col].rank(pct=True)
