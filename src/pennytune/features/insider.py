@@ -18,7 +18,9 @@ institutional accumulation. The code-P buying signal softens a dilution
 read; selling / a wave of 144s hardens it.
 
 The analytical core is pure over structured transaction lists (testable);
-edgartools is the fetch boundary (Forms 3/4/5, 144, 13D/G, 13F).
+:class:`EdgarInsiderProvider` is the fetch boundary (Forms 3/4/5, 144, 13D/G,
+13F), pulling the ownership documents from EDGAR over the security-hardened
+HTTP client and parsing them with ``defusedxml``. edgartools is not used here.
 """
 
 from __future__ import annotations
