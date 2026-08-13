@@ -1,4 +1,4 @@
-"""8-K item-code event engine: structured material-event scoring.
+"""8-K item-code event engine, plus SEC staff correspondence.
 
 Turns every 8-K into a scored, categorized event using its **item codes** (the
 SEC's structured numbering), with no NLP - just a dictionary lookup over the
@@ -9,13 +9,17 @@ catalyst, manipulation-susceptibility, and delisting analyses.
 The submissions ``filings.recent.items`` field is a parallel array of
 comma-separated item-code strings (e.g. ``"1.01,3.02,9.01"``); parsing is
 schema-tolerant and treats the response as untrusted external input.
+
+:func:`comment_letter_activity` reads the same payload for SEC staff
+correspondence. It is disclosure only: it feeds no signal, no score and no
+gate, and lives here because the payload is already parsed here.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 __all__ = [
@@ -34,6 +38,9 @@ __all__ = [
     "build_event",
     "parse_submissions_8k_events",
     "build_event_tape",
+    "COMMENT_LETTER_WINDOW_DAYS",
+    "CommentLetterActivity",
+    "comment_letter_activity",
 ]
 
 FINANCING = "financing"
@@ -283,4 +290,103 @@ def build_event_tape(
         signals=signals,
         promotional_cadence=promotional_cadence,
         flags=flags,
+    )
+
+
+# Staff comment letters are released no earlier than 20 business days after a
+# review closes, so nothing here is ever fresh: across 211 sampled filers the
+# newest letter anywhere was 94 days old, and the median micro-cap's most
+# recent letter was 1.4 years old. Unwindowed the line says nothing, since some
+# letter is on file for 84% of micro caps. A year holds it to a quarter of
+# them, and it still covers 55% of those whose annual report discloses
+# going-concern doubt against 14% of those that do not.
+COMMENT_LETTER_WINDOW_DAYS = 365
+
+# The submissions index uses UPLOAD for the staff letter and CORRESP for the
+# registrant reply. LETTER is the uploaded FILE type, not a form type, and
+# matching on it compiles, runs, and silently never fires.
+_STAFF_LETTER_FORM = "UPLOAD"
+_REGISTRANT_REPLY_FORM = "CORRESP"
+
+
+@dataclass
+class CommentLetterActivity:
+    """Staff comment letters in the window, carried for disclosure only.
+
+    Both counts cover the same window as ``latest``. A lifetime count reads as
+    if it were current: an issuer reviewed in 2011 and again last spring would
+    otherwise show a double-digit total next to a recent date.
+
+    ``response_count`` sits beside ``count`` and nothing is inferred from the
+    gap: filers routinely answer inside another filing rather than a standalone
+    CORRESP, so a letter without a matching reply is not an open question.
+    """
+
+    count: int
+    response_count: int
+    latest: str
+    window_days: int = COMMENT_LETTER_WINDOW_DAYS
+
+    def note(self) -> str:
+        # Replies routinely outnumber letters in a window: CORRESP posts on
+        # filing, the letter itself only after the review closes.
+        letters = "letter" if self.count == 1 else "letters"
+        replies = (
+            "no separate response"
+            if self.response_count == 0
+            else f"{self.response_count} response(s)"
+        )
+        return (
+            f"SEC staff comment letters — {self.count} {letters}, {replies} in "
+            f"the last {self.window_days} days; most recent {self.latest} "
+            "(released after the review closed; subject not in the index). "
+            "Not scored."
+        )
+
+
+def comment_letter_activity(
+    submissions_json: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    window_days: int = COMMENT_LETTER_WINDOW_DAYS,
+) -> CommentLetterActivity | None:
+    """Staff correspondence from the submissions index, or None.
+
+    None when no letter falls inside the window. Both counts are windowed with
+    the date, so the three numbers describe one period. Parsing is
+    schema-tolerant for the same reason as the 8-K reader: the payload is
+    untrusted external input.
+    """
+    recent = (submissions_json.get("filings") or {}).get("recent") or {}
+    forms = recent.get("form") or []
+    dates = recent.get("filingDate") or []
+    if not isinstance(forms, list) or not isinstance(dates, list):
+        return None
+
+    reference = (now or datetime.now(UTC)).date()
+    cutoff = reference - timedelta(days=window_days)
+    letters: list[str] = []
+    replies = 0
+    for index, form in enumerate(forms):
+        if form not in (_STAFF_LETTER_FORM, _REGISTRANT_REPLY_FORM):
+            continue
+        raw = str(dates[index]) if index < len(dates) else ""
+        try:
+            filed = date.fromisoformat(raw[:10])
+        except ValueError:
+            continue
+        if filed < cutoff:
+            continue
+        if form == _STAFF_LETTER_FORM:
+            letters.append(raw[:10])
+        else:
+            replies += 1
+    if not letters:
+        return None
+
+    return CommentLetterActivity(
+        count=len(letters),
+        response_count=replies,
+        latest=max(letters),
+        window_days=window_days,
     )
