@@ -138,7 +138,11 @@ class RateLimits(BaseModel):
 
 
 class CacheTTL(BaseModel):
-    """Per-domain cache TTLs in seconds."""
+    """Per-domain cache TTLs in seconds.
+
+    INERT: nothing reads these. There is no response cache in this build; every
+    run re-fetches from SEC EDGAR. Retained so existing config files still load.
+    """
 
     model_config = _MODEL_CONFIG
 
@@ -251,9 +255,9 @@ def apply_profile(cfg: Config, name: str) -> None:
 def apply_preset(cfg: Config, name: str) -> None:
     """Set the active universe preset.
 
-    A preset now only selects a per-tier risk-weighting bundle (read from
-    ``cfg.presets[name]`` by the scorer); it carries no price/size band, since
-    the universe is the full SEC-listed set with no price filtering.
+    A preset selects a per-tier risk-weighting bundle (read from
+    ``cfg.presets[name]`` by the scorer). It carries no price/size band: the
+    universe is the full SEC-listed set with no price filtering.
     """
     if name not in _PRESET_NAMES:
         raise ValueError(f"invalid preset {name!r}; choose from {list(_PRESET_NAMES)}")
@@ -309,8 +313,24 @@ def get_value(cfg: Config, key: str) -> Any:
     return node
 
 
-def _coerce(raw: str, current: Any) -> Any:
-    """Coerce a CLI string to the type of the existing value."""
+def _coerce(raw: str, current: Any, key: str = "") -> Any:
+    """Coerce a CLI string to the type of the existing value.
+
+    ``key`` only shapes the error message for a nested table.
+    """
+    if isinstance(current, BaseModel):
+        # A nested table (``presets.<name>``) has no single value to assign.
+        # This is reachable only through the dict branch of ``set_value``:
+        # assigning into a plain dict does NOT fire pydantic's
+        # ``validate_assignment``, so without this branch the raw string is
+        # written straight to disk and the resulting file cannot be loaded
+        # again, leaving the tool unusable. Refuse the write instead.
+        field = next(iter(type(current).model_fields), "")
+        example = f"{key}.{field}" if key and field else field
+        hint = f" (e.g. {example})" if example else ""
+        raise ValueError(
+            f"expected a single value, got a table; set one of its fields instead{hint}"
+        )
     if isinstance(current, bool):
         low = raw.strip().lower()
         if low in ("true", "1", "yes", "on"):
@@ -365,11 +385,11 @@ def set_value(cfg: Config, key: str, raw: str) -> None:
     if isinstance(parent, BaseModel):
         if leaf not in type(parent).model_fields:
             raise KeyError(key)
-        setattr(parent, leaf, _coerce(raw, getattr(parent, leaf)))
+        setattr(parent, leaf, _coerce(raw, getattr(parent, leaf), key))
     elif isinstance(parent, dict):
         if leaf not in parent:
             raise KeyError(key)
-        parent[leaf] = _coerce(raw, parent[leaf])
+        parent[leaf] = _coerce(raw, parent[leaf], key)
     else:
         raise KeyError(key)
 
