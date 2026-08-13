@@ -59,6 +59,7 @@ __all__ = [
     "detect_toxic_financing",
     "dilution_velocity",
     "authorized_headroom",
+    "authorized_shares_from_facts",
     "fully_diluted_overhang",
     "detect_reverse_splits",
     "auditor_flags",
@@ -77,9 +78,19 @@ SHELF_FORMS = frozenset(
 )
 PROSPECTUS_FORMS = frozenset({"424B3", "424B5", "424B4", "424B2"})
 NT_FORMS = frozenset({"NT 10-K", "NT 10-Q", "NT 10-K/A", "NT 10-Q/A", "NT 20-F"})
+# ``dei:EntityCommonStockSharesOutstanding`` is the cover-page "shares
+# outstanding as of <date>" count. It is stated once per filing and is NOT
+# retroactively restated when the issuer later splits, so differencing it
+# measures real share-count change.
+# ``us-gaap:CommonStockSharesOutstanding`` IS restated: after a forward split a
+# 10-K point carries the split-adjusted count while the surrounding 10-Q points
+# remain as-reported. Differencing that mixture manufactures reverse splits out
+# of nothing, including multi-hundred-x ratios on large caps that have never
+# split backwards. Ordering dei first keeps the series as-reported throughout
+# and still catches the genuine serial splitters.
 SHARE_TAGS: tuple[tuple[str, str], ...] = (
-    ("us-gaap", "CommonStockSharesOutstanding"),
     ("dei", "EntityCommonStockSharesOutstanding"),
+    ("us-gaap", "CommonStockSharesOutstanding"),
     ("us-gaap", "WeightedAverageNumberOfSharesOutstandingBasic"),
 )
 # Death-spiral / toxic-financing language.
@@ -95,6 +106,10 @@ TOXIC_PATTERNS = (
     "reset provision",
     "most favored nation",
 )
+# Above this one-period share-count contraction the input is a tagging error,
+# not a corporate action (a filer tagging thousands as shares reads as ~1000x).
+# Real reverse splits cluster at 1:2 to 1:50; 1:250 is already extreme.
+MAX_PLAUSIBLE_SPLIT_RATIO = 250.0
 _DEATH_SPIRAL_QOQ = 0.20  # 20%+/quarter share growth
 _ATM_THRESHOLD = 2  # repeated 424B3 within window = active ATM drip
 
@@ -398,19 +413,27 @@ def authorized_headroom(
     outstanding: float | None,
     event_tape: EventTape | None = None,
 ) -> AuthorizedHeadroom:
+    """Grade how much of the authorized share count is already issued.
+
+    ``headroom_pct`` stays None when the ratio cannot be trusted, and the caller
+    suppresses rather than guessing. Outstanding above authorized is the usual
+    untrustworthy case: companyfacts tags ``CommonStockSharesAuthorized`` per
+    class, so a multi-class filer, or one that stopped tagging the concept years
+    ago, reports a ceiling well below its real one. Reading that as "near the
+    ceiling" would fire hardest on the filers with the worst data.
+    """
     headroom_pct: float | None = None
     near_ceiling = False
     if authorized and outstanding is not None and authorized > 0:
-        headroom_pct = (authorized - outstanding) / authorized * 100.0
-        near_ceiling = (outstanding / authorized) >= 0.90
-    # An 8-K 5.03 (charter amendment) or 5.07 (shareholder vote) signals intent
-    # to raise the authorized count.
+        if outstanding <= authorized:
+            headroom_pct = (authorized - outstanding) / authorized * 100.0
+            near_ceiling = (outstanding / authorized) >= 0.90
+    # 5.03 amends the charter, which is how the authorized count gets raised.
+    # 5.07 is deliberately excluded: it is the annual shareholder meeting, filed
+    # by essentially every issuer every year, so it says nothing about headroom.
     increase_event = False
     if event_tape is not None:
-        increase_event = (
-            event_tape.item_counts.get("5.03", 0) > 0
-            or event_tape.item_counts.get("5.07", 0) > 0
-        )
+        increase_event = event_tape.item_counts.get("5.03", 0) > 0
     return AuthorizedHeadroom(
         authorized=authorized,
         outstanding=outstanding,
@@ -418,6 +441,35 @@ def authorized_headroom(
         near_ceiling=near_ceiling,
         authorized_increase_event=increase_event,
     )
+
+
+def authorized_shares_from_facts(facts_json: dict[str, Any]) -> float | None:
+    """Latest ``us-gaap:CommonStockSharesAuthorized`` from companyfacts.
+
+    Free: ``build_dilution_evidence`` already holds the companyfacts payload for
+    the share-count series, so this costs no extra request.
+    """
+    concept = (
+        (facts_json.get("facts") or {})
+        .get("us-gaap", {})
+        .get("CommonStockSharesAuthorized")
+    )
+    if not concept:
+        return None
+    rows = (concept.get("units") or {}).get("shares") or []
+    best: tuple[str, float] | None = None
+    for row in rows:
+        if not isinstance(row, dict) or row.get("val") is None:
+            continue
+        end = str(row.get("end", ""))
+        if not end:
+            continue
+        value = float(row["val"])
+        if value <= 0:
+            continue
+        if best is None or end >= best[0]:
+            best = (end, value)
+    return best[1] if best else None
 
 
 def fully_diluted_overhang(
@@ -442,17 +494,26 @@ def fully_diluted_overhang(
 
 
 def detect_reverse_splits(
-    series: Sequence[ShareCountPoint], *, min_ratio: float = 1.8
+    series: Sequence[ShareCountPoint],
+    *,
+    min_ratio: float = 1.8,
+    max_ratio: float = MAX_PLAUSIBLE_SPLIT_RATIO,
 ) -> ReverseSplits:
+    """Reverse splits from share-count history (never price).
+
+    A ratio above ``max_ratio`` is treated as a data error rather than a
+    corporate action: filers occasionally tag a share count in thousands, which
+    presents as a ~1000x one-period collapse. Suppress-not-impute - the
+    implausible point yields no event rather than a fabricated split.
+    """
     ordered = sorted(series, key=lambda p: p.period_end)
     events: list[ReverseSplitEvent] = []
     for prev, cur in zip(ordered, ordered[1:], strict=False):
-        if prev.shares > 0 and cur.shares > 0 and prev.shares / cur.shares >= min_ratio:
-            events.append(
-                ReverseSplitEvent(
-                    period_end=cur.period_end, ratio=prev.shares / cur.shares
-                )
-            )
+        if prev.shares <= 0 or cur.shares <= 0:
+            continue
+        ratio = prev.shares / cur.shares
+        if min_ratio <= ratio <= max_ratio:
+            events.append(ReverseSplitEvent(period_end=cur.period_end, ratio=ratio))
     cumulative: float | None = None
     for event in events:
         cumulative = event.ratio if cumulative is None else cumulative * event.ratio
@@ -587,9 +648,14 @@ def compute_dilution(inputs: DilutionInputs) -> DilutionProfile:
         evidence.append(
             f"share count +{velocity.qoq * 100:.0f}% QoQ ({velocity.trend or 'n/a'})"
         )
-    if headroom.near_ceiling or headroom.authorized_increase_event:
+    # Requires a measured ceiling. An 8-K alone is not evidence of low headroom,
+    # and gating on one makes the flag unconditional across the whole market.
+    if headroom.near_ceiling and headroom.headroom_pct is not None:
         score += 10
         flags.append("AUTHORIZED-HEADROOM-LOW")
+        evidence.append(
+            f"{100.0 - headroom.headroom_pct:.0f}% of authorized shares issued"
+        )
     if overhang.overhang_pct is not None and overhang.overhang_pct > 100:
         score += 15
         flags.append("OVERHANG-HIGH")
@@ -763,8 +829,25 @@ class EdgarDilutionProvider:
     # Best-effort toxic-financing probe: the ownership-cap boilerplate nearly
     # every toxic convertible/warrant deal carries, scoped to financing forms so
     # benign ownership disclosures (13D/G) do not trip it.
-    TOXIC_EFTS_PHRASE = "beneficial ownership limitation"
+    #
+    # The phrase MUST stay quoted. EDGAR full-text search treats an unquoted
+    # multi-word query as loose words, which matches any filing containing
+    # "beneficial", "ownership" and "limitation" anywhere - i.e. essentially
+    # every large-cap prospectus. Measured live: unquoted returned 18/21/29/88/123
+    # hits for AAPL/MSFT/JNJ/KO/WMT and quoted returns 0 for all five, while
+    # still returning 54/16/34/61 for ASNS/GITS/LASE/AEMD.
+    TOXIC_EFTS_PHRASE = '"beneficial ownership limitation"'
     TOXIC_EFTS_FORMS = "424B5,424B3,424B4,8-K,S-1,S-3"
+
+    # Continued-listing deficiency probe. Item 3.01 is the tagged route, but
+    # roughly a fifth to a half of 8-Ks carrying listing-deficiency language
+    # file it under 8.01/7.01 instead, varying by phrase. Without this probe
+    # those disclosures are invisible. The phrases are narrow enough that
+    # healthy large caps return nothing.
+    DELISTING_EFTS_QUERY = (
+        '"regain compliance" OR "minimum bid price" OR "Listing Qualifications"'
+    )
+    DELISTING_EFTS_FORMS = "8-K"
 
     def __init__(self, client: SafeHttpClient) -> None:
         self._client = client
@@ -779,13 +862,20 @@ class EdgarDilutionProvider:
         return payload
 
     def full_text_search(
-        self, query: str, *, forms: str | None = None, ciks: str | None = None
+        self,
+        query: str,
+        *,
+        forms: str | None = None,
+        ciks: str | None = None,
+        dates: tuple[str, str] | None = None,
     ) -> dict[str, Any]:
         params = {"q": query}
         if forms:
             params["forms"] = forms
         if ciks:  # scope to one issuer so the hit-count is company-specific
             params["ciks"] = str(ciks).zfill(10)
+        if dates:  # bound the window so a long-cured notice does not flag
+            params["startdt"], params["enddt"] = dates
         payload: dict[str, Any] = self._client.get_json(
             self.EFTS_URL, provider="edgar", params=params
         )
@@ -816,6 +906,18 @@ class EdgarDilutionProvider:
         """
         completeness: list[str] = []
         share_series = share_count_series(companyfacts)
+        authorized = authorized_shares_from_facts(companyfacts)
+        outstanding = share_series[-1].shares if share_series else None
+        if authorized is None:
+            completeness.append(
+                "authorized-share headroom suppressed "
+                "(no CommonStockSharesAuthorized in companyfacts)"
+            )
+        elif outstanding is not None and outstanding > authorized:
+            completeness.append(
+                "authorized-share headroom suppressed (reported authorized count "
+                "is below shares outstanding; per-class or stale tagging)"
+            )
 
         filings: list[FilingRef] = []
         sic_code: int | None = None
@@ -838,7 +940,9 @@ class EdgarDilutionProvider:
                 ciks=cik,
             )
             if parse_efts_hits(hits):
-                financing_texts.append(self.TOXIC_EFTS_PHRASE)
+                # Feed the pattern-matcher the bare phrase, not the quoted
+                # query form, so TOXIC_PATTERNS matching stays exact.
+                financing_texts.append(self.TOXIC_EFTS_PHRASE.strip('"'))
         except ProviderError as exc:
             completeness.append(f"toxic-financing scan degraded (EFTS: {exc})")
 
@@ -848,6 +952,7 @@ class EdgarDilutionProvider:
             revenue=revenue,
             financing_texts=financing_texts,
             event_tape=event_tape,
+            cover=CoverPageFacts(authorized_shares=authorized),
             now=now,
         )
         return DilutionEvidence(
