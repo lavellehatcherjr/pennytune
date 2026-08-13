@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pennytune"
-version = "0.1.0"
-description = "PennyTune is a free, no-API-key command-line forensic due-diligence tool for US-listed micro-caps: it surfaces risk signals and forensic flags from a company's SEC filings (accounting-quality and distress scores, dilution and corporate-action risk, insider activity, 8-K material events, delisting-notice and active trading-suspension risk, and fails-to-deliver settlement context), each traced to the underlying filing, for research only, not investment advice."
+version = "0.2.0"
+description = "PennyTune is a free, no-API-key command-line forensic due-diligence tool for US-listed micro-caps: it surfaces risk signals and forensic flags from a company's SEC filings (accounting-quality and distress scores, dilution and corporate-action risk, insider activity, 8-K material events, delisting-notice and active trading-suspension risk, and fails-to-deliver settlement context), computed from the company's public SEC filings, for research only, not investment advice."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Lavelle Hatcher Jr" }]
@@ -54,14 +54,23 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "pandas==3.0.3",
+    # Range, not an exact pin: this is a published library, so an exact pin
+    # makes the package unco-installable with anything wanting another pandas
+    # and breaks any tool that re-resolves (pip-audit did). The 3.0.5 floor
+    # keeps resolution off the yanked 3.0.4.
+    "pandas>=3.0.5,<4",
     "numpy>=2.4.1",
-    "pyarrow>=14.0.1",
+    # 15.0.0 through 23.0.0 carry CVE-2026-25087, a use-after-free in the IPC
+    # reader. Lowering this floor to widen compatibility reopens that range.
+    "pyarrow>=23.0.1",
     "edgartools",
     "typer",
     "rich",
     "pyfiglet",
-    "pydantic",
+    # Capped: the config system is built on pydantic v2 APIs (ConfigDict,
+    # field_validator, model_dump/model_validate/model_fields), which a v3
+    # would be free to change.
+    "pydantic>=2,<3",
     "platformdirs",
     "tomli-w",
     "pyrate-limiter",
@@ -71,8 +80,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-schema = ["pydantic", "tomli-w"]
-dev = ["pytest", "pytest-asyncio", "pytest-mock", "responses", "ruff", "mypy==2.1.0", "pip-audit", "build", "twine"]
+schema = ["pydantic>=2,<3", "tomli-w"]
+dev = ["pytest", "pytest-asyncio", "pytest-mock", "responses", "ruff", "mypy>=2.3,<3", "pip-audit", "build", "twine"]
 
 [project.urls]
 Homepage = "https://github.com/lavellehatcherjr/pennytune"
