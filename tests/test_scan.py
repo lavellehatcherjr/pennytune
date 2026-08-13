@@ -33,19 +33,30 @@ from pennytune.scan import (
 def _period(
     *, scale: float = 1.0, healthy: bool = True, **kw: float
 ) -> PeriodFinancials:
-    """A fully-populated fiscal period so the quant scores are computable."""
+    """A fully-populated fiscal period so the quant scores are computable.
+
+    ``healthy=False`` has to be a genuinely distressed balance sheet. Keeping a
+    healthy working-capital position (600 current assets against 200 current
+    liabilities) holds Z'' at +0.97, inside the grey zone, because Altman
+    weights working capital most heavily - so a test asserting ``distress``
+    against it passes only while grey and distress share a label. The
+    distressed variant therefore also draws down current assets and shifts
+    liabilities to the current side, which is what a company in that condition
+    actually looks like, giving Z'' = -4.28.
+    """
     base: dict[str, float | None] = dict(
         total_assets=1000.0 * scale,
-        current_assets=600.0 * scale,
-        current_liabilities=200.0 * scale,
-        cash=300.0 * scale,
+        current_assets=(600.0 if healthy else 300.0) * scale,
+        current_liabilities=(200.0 if healthy else 700.0) * scale,
+        cash=(300.0 if healthy else 100.0) * scale,
         receivables=120.0 * scale,
         inventory=80.0 * scale,
         net_ppe=300.0 * scale,
         gross_ppe=400.0 * scale,
         total_liabilities=(300.0 if healthy else 950.0) * scale,
         total_debt=(100.0 if healthy else 600.0) * scale,
-        long_term_debt=(80.0 if healthy else 500.0) * scale,
+        # current + long-term must not exceed total liabilities.
+        long_term_debt=(80.0 if healthy else 250.0) * scale,
         retained_earnings=(200.0 if healthy else -400.0) * scale,
         book_equity=(700.0 if healthy else 50.0) * scale,
         revenue=900.0 * scale,
@@ -79,7 +90,11 @@ def _evidence_good(ticker: str) -> RawEvidence:
         ticker=ticker,
         sic_sector="3674",
         sic_code=3674,
-        market_cap=60_000_000.0,
+        # Market cap is on the same scale as the period's revenue (900) so
+        # EV/Sales is a realistic multiple. Positive sub-scores are absolute
+        # anchors, so the magnitude matters here and a unit mismatch would skew
+        # the result rather than cancel out.
+        market_cap=1_600.0,
         current_price=0.80,
         financials_period="2026-Q1",
         financials_filed="2026-05-08",
@@ -101,7 +116,7 @@ def _evidence_weak(ticker: str) -> RawEvidence:
         ticker=ticker,
         sic_sector="3674",
         sic_code=3674,
-        market_cap=250_000_000.0,  # same micro bucket as GOOD, but pricier per $ sales
+        market_cap=7_000.0,  # same revenue scale as GOOD, but pricier per $ sales
         current_price=0.40,
         financials_period="2026-Q1",
         financials_filed="2026-05-09",
@@ -351,7 +366,14 @@ def test_partial_failure_threshold() -> None:
 # ---- graceful degradation: provider down → completeness flag -----------------
 
 
-def test_degraded_evidence_still_completes_with_flag() -> None:
+def test_degraded_evidence_is_reported_as_not_assessed_never_scored() -> None:
+    """A name whose every source came back empty must not be scored at all.
+
+    Scoring one anyway produces a composite that reflects nothing but missing
+    data, and it outranks names whose risk was actually measured precisely
+    because nothing could be found against it. The name is still surfaced, as an
+    explicit exclusion plus its completeness flags, never silently dropped.
+    """
     candidate = _candidate("DOWN")
 
     class DownProvider:
@@ -359,7 +381,8 @@ def test_degraded_evidence_still_completes_with_flag() -> None:
             return degraded_evidence(c, "provider down")
 
     report = run_scan([candidate], DownProvider(), _request())
-    assert report.scanned == 1  # still produced a result
+    assert report.scanned == 0  # not scored
+    assert dict(report.excluded_by_filter)["DOWN"].startswith("not assessed")
     assert "DOWN" in report.completeness_flags
     assert any("degraded" in f for f in report.completeness_flags["DOWN"])
 
