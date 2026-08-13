@@ -32,6 +32,9 @@ __all__ = [
     "EdgarSuspensionProvider",
 ]
 
+# Lookback for the suspension gate. Deliberately far longer than the 10 trading
+# days a suspension actually runs: there is no feed for when one lifts, so this
+# holds a name out for six months after the SEC last acted against it.
 _RECENT_DAYS = 180
 
 
@@ -203,8 +206,11 @@ class EdgarSuspensionProvider:
     The list (≈one HTML page of the most recent suspensions, newest first) is
     fetched a single time and cached, so a whole scan costs one request; each
     name is matched by normalized company name (the list carries no ticker) and
-    graded by the unchanged :func:`compute_halt_risk` recency logic — the gate
-    fires only on an active/recent suspension, never an expired one.
+    graded by :func:`compute_halt_risk`. The gate fires on any suspension inside
+    the 180-day window. SEC suspensions run at most 10 trading days, so most of
+    that window covers suspensions that have already lapsed; the tool has no
+    feed telling it when one ended, and holding a name out is the safe side of
+    that ignorance.
     """
 
     SUSPENSIONS_URL = "https://www.sec.gov/litigation/suspensions"
