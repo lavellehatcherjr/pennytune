@@ -11,9 +11,9 @@ Design: the analytical core (:func:`compute_fundamentals`) is a pure function
 over the canonical ``companyfacts`` JSON, so it is fully testable from fixtures
 with no network and gives exact tag-fallback control (it records *which* XBRL
 tag supplied each value). The fetch boundary
-(:class:`EdgarFundamentalsProvider`) calls edgartools' ``set_identity`` (the
-SEC-required identity header) and retrieves companyfacts through the hardened,
-rate-limited, cached HTTP client of the data layer. EDGAR bulk
+(:class:`EdgarFundamentalsProvider`) retrieves companyfacts through the
+rate-limited, security-hardened HTTP client of the data layer. There is no
+response cache; every run re-fetches. EDGAR bulk
 ``companyfacts.zip`` is supported via :func:`companyfacts_from_zip` (preferred
 at full-universe scale).
 
@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -69,6 +70,8 @@ CASH_TAGS: tuple[tuple[str, str], ...] = (
 LONG_TERM_DEBT_TAGS: tuple[tuple[str, str], ...] = (
     ("us-gaap", "LongTermDebtNoncurrent"),
     ("us-gaap", "LongTermDebt"),
+    # AMT/CVX/KO/OLLI/SO/XOM report the lease-inclusive concept instead.
+    ("us-gaap", "LongTermDebtAndCapitalLeaseObligations"),
 )
 CURRENT_DEBT_TAGS: tuple[tuple[str, str], ...] = (
     ("us-gaap", "LongTermDebtCurrent"),
@@ -99,6 +102,43 @@ CURRENT_LIABILITIES_TAGS: tuple[tuple[str, str], ...] = (
     ("us-gaap", "LiabilitiesCurrent"),
 )
 TOTAL_LIABILITIES_TAGS: tuple[tuple[str, str], ...] = (("us-gaap", "Liabilities"),)
+# Fallback legs for total liabilities. ~21% of filers never report
+# ``us-gaap:Liabilities`` (KO, WMT, DIS, DUK, ABBV, MCD, NKE, MRK, LLY, ...),
+# but every balance sheet foots, so liabilities = the balance-sheet total minus
+# EVERYTHING that is not a liability: total equity INCLUDING noncontrolling
+# interests, plus any temporary/mezzanine equity.
+#
+# Validated on 72 filers that DO report ``Liabilities`` directly, comparing the
+# derivation against it: subtracting parent-only ``StockholdersEquity`` (the
+# obvious form) is exact for 50 but wrong by more than 0.5% on 14 - up to +70%
+# (HCMC), -57% (GXAI), +25% (XTIA), +4.3% (CVX) - because the residual is
+# noncontrolling interest and redeemable equity, and negative NCI makes it err
+# in BOTH directions. Subtracting total equity plus temporary equity is exact
+# on all 72.
+BALANCE_SHEET_TOTAL_TAGS: tuple[tuple[str, str], ...] = (
+    ("us-gaap", "LiabilitiesAndStockholdersEquity"),
+)
+TOTAL_EQUITY_TAGS: tuple[tuple[str, str], ...] = (
+    (
+        "us-gaap",
+        "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+    ),
+)
+MINORITY_INTEREST_TAGS: tuple[tuple[str, str], ...] = (("us-gaap", "MinorityInterest"),)
+# Mezzanine equity sits between liabilities and equity and is neither. Note the
+# singular/plural spellings are both in use (the plural one is SPG's).
+TEMPORARY_EQUITY_TAGS: tuple[tuple[str, str], ...] = (
+    (
+        "us-gaap",
+        "TemporaryEquityCarryingAmountIncludingPortionAttributableToNoncontrollingInterests",
+    ),
+    (
+        "us-gaap",
+        "TemporaryEquityCarryingAmountIncludingPortionAttributableToNoncontrollingInterest",
+    ),
+    ("us-gaap", "TemporaryEquityCarryingAmountAttributableToParent"),
+    ("us-gaap", "RedeemableNoncontrollingInterestEquityCarryingAmount"),
+)
 RETAINED_EARNINGS_TAGS: tuple[tuple[str, str], ...] = (
     ("us-gaap", "RetainedEarningsAccumulatedDeficit"),
 )
@@ -116,6 +156,14 @@ RECEIVABLES_TAGS: tuple[tuple[str, str], ...] = (
 INVENTORY_TAGS: tuple[tuple[str, str], ...] = (("us-gaap", "InventoryNet"),)
 NET_PPE_TAGS: tuple[tuple[str, str], ...] = (
     ("us-gaap", "PropertyPlantAndEquipmentNet"),
+    # Post-ASC842 the finance-lease ROU asset is folded in by GOOGL/META/HD/
+    # LOW/CVX/AMT/T/TGT/WFC; utilities and REITs use their own concepts.
+    (
+        "us-gaap",
+        "PropertyPlantAndEquipmentAndFinanceLeaseRightOfUseAssetAfterAccumulatedDepreciationAndAmortization",
+    ),
+    ("us-gaap", "PublicUtilitiesPropertyPlantAndEquipmentNet"),
+    ("us-gaap", "RealEstateInvestmentPropertyNet"),
 )
 GROSS_PPE_TAGS: tuple[tuple[str, str], ...] = (
     ("us-gaap", "PropertyPlantAndEquipmentGross"),
@@ -480,8 +528,29 @@ def _fiscal_year_ends(facts_json: dict[str, Any]) -> list[str]:
                     and str(row.get("form", "")).startswith("10-K")
                     and row.get("end")
                 ):
+                    # A reported period cannot end after the report that carries
+                    # it was filed. Forward-looking footnote facts (expected
+                    # restructuring cost, plan match percentages, IPO proceeds)
+                    # are tagged fp=FY on the 10-K but carry a FUTURE ``end``,
+                    # and a single one of them wins the max() below - anchoring
+                    # the period on a date where no balance sheet exists, so
+                    # every line item resolves to None and the filer is scored
+                    # from an empty period. Observed on SBUX, PALI and ENVB.
+                    if _ends_after_filing(row):
+                        continue
                     ends.add(str(row["end"]))
     return sorted(ends)
+
+
+def _ends_after_filing(row: dict[str, Any]) -> bool:
+    """True when a fact's period ``end`` post-dates the filing that reports it."""
+    end, filed = str(row.get("end", "")), str(row.get("filed", ""))
+    if not end or not filed:
+        return False
+    try:
+        return date.fromisoformat(end) > date.fromisoformat(filed)
+    except ValueError:
+        return False
 
 
 def _fact_at_end(
@@ -521,6 +590,59 @@ def _fact_at_end(
     return None, ""
 
 
+def _first_not_none(
+    direct: float | None, fallback: Callable[[], float | None]
+) -> float | None:
+    """A reported value always wins; the fallback runs only when it is absent."""
+    return direct if direct is not None else fallback()
+
+
+def _sum_present(*values: float | None) -> float | None:
+    """Sum the operands, or ``None`` when every one is missing.
+
+    A present leg plus an absent one is the present leg: a filer reporting only
+    long-term debt has no current portion to add, which is a real zero rather
+    than an imputed one.
+    """
+    present = [v for v in values if v is not None]
+    return sum(present) if present else None
+
+
+def _derived_total_liabilities(facts_json: dict[str, Any], end: str) -> float | None:
+    """Total liabilities from the balance-sheet identity, or ``None``.
+
+    ``balance-sheet total - total equity - temporary equity``. Every operand is
+    read at the SAME period ``end``, so the legs cannot come from different
+    fiscal years. Returns ``None`` unless both required legs resolve -
+    suppress-not-impute: a missing operand yields no value rather than being
+    treated as zero.
+
+    Temporary equity is the one term defaulted to zero when absent, because it
+    is a balance-sheet line that appears only when it exists; the identity does
+    not foot otherwise. That default is what makes the derivation exact on all
+    72 validation filers rather than 71.
+    """
+    total, _ = _fact_at_end(
+        facts_json, BALANCE_SHEET_TOTAL_TAGS, "USD", end, instant=True
+    )
+    if total is None:
+        return None
+    equity, _ = _fact_at_end(facts_json, TOTAL_EQUITY_TAGS, "USD", end, instant=True)
+    if equity is None:
+        # No combined-equity tag: rebuild it as parent equity + minority interest.
+        parent, _ = _fact_at_end(facts_json, BOOK_EQUITY_TAGS, "USD", end, instant=True)
+        if parent is None:
+            return None
+        minority, _ = _fact_at_end(
+            facts_json, MINORITY_INTEREST_TAGS, "USD", end, instant=True
+        )
+        equity = parent + (minority or 0.0)
+    temporary, _ = _fact_at_end(
+        facts_json, TEMPORARY_EQUITY_TAGS, "USD", end, instant=True
+    )
+    return total - equity - (temporary or 0.0)
+
+
 def _shares_at_end(facts_json: dict[str, Any], end: str) -> float | None:
     """Share count for the fiscal year ending ``end``.
 
@@ -528,8 +650,6 @@ def _shares_at_end(facts_json: dict[str, Any], end: str) -> float | None:
     so the fact nearest the period end within a sensible window is taken;
     balance-sheet share tags (which do land on the period end) are preferred.
     """
-    # Cover-page share counts (``dei``) are dated at filing, not fiscal-year-end,
-    # so the nearest fact within a window is taken (``SHARES_TAGS`` order applies).
     target = date.fromisoformat(end)
     for taxonomy, tag in SHARES_TAGS:
         best_key: tuple[int, str] | None = None
@@ -582,8 +702,17 @@ def _period_at_end(
         inventory=inst(INVENTORY_TAGS),
         net_ppe=inst(NET_PPE_TAGS),
         gross_ppe=inst(GROSS_PPE_TAGS),
-        total_liabilities=inst(TOTAL_LIABILITIES_TAGS),
-        total_debt=inst(COMBINED_DEBT_TAGS),
+        total_liabilities=_first_not_none(
+            inst(TOTAL_LIABILITIES_TAGS),
+            lambda: _derived_total_liabilities(facts_json, end),
+        ),
+        total_debt=_first_not_none(
+            inst(COMBINED_DEBT_TAGS),
+            # Both paths have to sum the two legs. Summing only in the record
+            # path leaves total_debt None for ~91% of filers that report the
+            # components but no combined tag.
+            lambda: _sum_present(inst(LONG_TERM_DEBT_TAGS), inst(CURRENT_DEBT_TAGS)),
+        ),
         long_term_debt=inst(LONG_TERM_DEBT_TAGS),
         retained_earnings=inst(RETAINED_EARNINGS_TAGS),
         book_equity=inst(BOOK_EQUITY_TAGS),
@@ -603,6 +732,28 @@ def _period_at_end(
         sbc=dur(SBC_TAGS),
     )
     return period, (max(filed_dates) if filed_dates else "")
+
+
+# The inputs the composite's positive half actually depends on. Named in one
+# consolidated completeness line when absent, so a partial balance sheet is
+# never mistaken for a complete one.
+_CORE_INPUTS: tuple[tuple[str, str], ...] = (
+    ("total_assets", "total_assets"),
+    ("current_assets", "current_assets"),
+    ("current_liabilities", "current_liabilities"),
+    ("total_liabilities", "total_liabilities"),
+    ("book_equity", "book_equity"),
+    ("retained_earnings", "retained_earnings"),
+    ("ebit", "ebit"),
+    ("revenue", "revenue"),
+)
+
+
+def _missing_core_inputs(period: PeriodFinancials | None) -> list[str]:
+    """Names of the scoring-critical line items this period could not supply."""
+    if period is None:
+        return []
+    return [label for label, attr in _CORE_INPUTS if getattr(period, attr) is None]
 
 
 def period_financials_from_companyfacts(
@@ -630,6 +781,18 @@ def period_financials_from_companyfacts(
     else:
         evidence.completeness.append(
             "fundamentals limited to one annual period (prior year unavailable)"
+        )
+
+    missing = _missing_core_inputs(evidence.period_t)
+    if missing:
+        # ONE consolidated line, however many inputs are absent: a per-field
+        # line would add up to eight lines to an output that already carries
+        # several. Without this a reader sees a composite with no positive
+        # contributions and no way to tell that half the balance sheet was
+        # never read.
+        evidence.completeness.append(
+            f"core inputs unavailable for {end_t}: {', '.join(missing)} "
+            "(dependent metrics suppressed)"
         )
 
     rev_t = evidence.period_t.revenue if evidence.period_t else None
@@ -661,9 +824,11 @@ class EdgarFundamentalsProvider(FundamentalsProvider):
     def __init__(self, client: SafeHttpClient, *, identity: str | None = None) -> None:
         self._client = client
         if identity:
-            # edgartools' SEC-required identity registration (used by its typed
-            # filing accessors elsewhere); the companyfacts fetch below still
-            # goes through our rate-limited, cached, security-hardened client.
+            # DEAD IN THE SHIPPED CLI: nothing passes ``identity`` (see the
+            # construction in ``cli``), so edgartools is never imported on a
+            # real run. Kept for callers that construct the provider directly
+            # and want edgartools' typed accessors to share the identity; the
+            # companyfacts fetch below goes through our own client either way.
             import edgar
 
             edgar.set_identity(identity)
