@@ -1,10 +1,20 @@
-# Dependabot config. Dependabot *proposes* updates by opening PRs; it never
-# auto-merges. Every Dependabot PR runs the full cross-platform CI matrix +
-# pip-audit and is reviewed before merge, preserving the deliberate-upgrade
-# supply-chain discipline. Auto-merge stays disabled.
+# Dependabot opens PRs; it never auto-merges. Every PR runs the full CI matrix
+# and pip-audit before anything lands.
 version: 2
 updates:
+  # pyproject.toml
   - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    # Dependabot treats a published pyproject.toml as a library and widens
+    # ranges by default, walking the pyarrow floor back under CVE-2026-25087.
+    versioning-strategy: "increase-if-necessary"
+
+  # uv.lock. Separate ecosystem from "pip", which reads pyproject.toml only, so
+  # without this the lock drifts and `uv sync` installs stale versions.
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
