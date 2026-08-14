@@ -74,10 +74,15 @@ giudizio spetta a te.
 
 - **Gratuito e senza chiavi API** - funziona interamente su dati pubblici, senza
   account e senza chiavi.
-- **Registrata presso la SEC, quotata su una delle principali borse statunitensi (NYSE/NASDAQ/NYSE American), mai OTC** - per costruzione.
-- **Basato su prove** - ogni segnale è calcolato dalle dichiarazioni SEC
-  pubbliche della società e, per i campanelli d'allarme guidati dagli eventi,
-  viene indicato lo specifico item 8-K.
+- **Soggetti registrati presso la SEC** - l'universo dei ticker proviene dai dati
+  pubblici della SEC. Non esiste alcun filtro di borsa: i titoli quotati OTC
+  vengono analizzati come qualsiasi altro, e il file SEC su cui si basa non
+  riporta alcuna designazione NYSE American.
+- **Basato su prove** - i segnali che vengono calcolati provengono dalle
+  dichiarazioni SEC pubbliche della società e, per i campanelli d'allarme guidati
+  dagli eventi, viene indicato lo specifico item 8-K. Due contributori, valutazione
+  e tono della copertura, non hanno alcuna fonte dati in questa build e sono sempre
+  soppressi (vedi **Limiti**).
 - **Trasparente e regolabile** - un punteggio composito scomponibile con pesi
   modificabili dall'utente, preset di screening (`penny` predefinito / `micro` /
   `small-cap-value` / `broad` / `custom`) e profili di strategia selezionabili
@@ -89,8 +94,8 @@ giudizio spetta a te.
 ## Cosa fa emergere
 
 Per ciascuna società, PennyTune legge le dichiarazioni SEC e valuta i segnali
-più rilevanti per una micro-cap - ognuno calcolato dalle dichiarazioni della
-società:
+più rilevanti per una micro-cap. Ogni segnale che non riesce a calcolare viene
+soppresso e riportato come tale, mai valutato come uno zero:
 
 - **Salute finanziaria e difficoltà** - punteggio di solvibilità Altman Z″ più
   una batteria forense (i modelli di manipolazione degli utili Beneish e di
@@ -104,22 +109,104 @@ società:
   ritenute fiscali, in modo che i premi non vengano mai interpretati come rialzisti
   - più l'overhang da vendite proposte nel Form 144 e l'attività di proprietà
   13D/13G.
-- **Eventi rilevanti 8-K** - il flusso strutturato dei codici item (riformulazioni,
-  cambi di revisore, dimissioni di dirigenti, carenze di quotazione e altre voci
-  rilevanti), ponderato per gravità anziché per conteggio grezzo.
+- **Eventi rilevanti 8-K** - il flusso strutturato dei codici item, ponderato per
+  gravità anziché per conteggio grezzo. L'Item 4.02, con cui l'emittente dichiara
+  che i propri bilanci già pubblicati non sono più affidabili, viene indicato e
+  conteggiato separatamente dall'Item 4.01, un cambio di revisore, accanto alle
+  dimissioni di dirigenti, alle carenze di quotazione e alle altre voci rilevanti.
 - **Rischio di notifica di delisting** - notifiche di carenza per il mantenimento
   della quotazione divulgate (8-K Item 3.01), riportate senza indovinare il
   conteggio dei giorni del price-clock che lo strumento non può calcolare.
-- **Sospensioni attive delle negoziazioni** - una società sottoposta a una
-  sospensione delle negoziazioni SEC *in corso* viene segnalata ed esclusa; le
-  sospensioni storiche scadute sono mostrate come contesto, non a sfavore della
-  società.
-- **Fails-to-deliver** - contesto sullo stress di regolamento dai dati bimestrali
-  della SEC sui fails-to-deliver (solo contesto - di per sé non è prova di
-  manipolazione).
-- **Classificazione settoriale** - il settore SIC di ciascuna società, in modo che
-  i confronti di qualità e valutazione siano effettuati rispetto a società
-  comparabili per settore e dimensione anziché a soglie assolute.
+- **Sospensioni delle negoziazioni** - una società con una sospensione delle
+  negoziazioni SEC negli ultimi 180 giorni viene segnalata ed esclusa. Nota che lo
+  strumento non tiene traccia se la sospensione sia nel frattempo decaduta: le
+  sospensioni SEC durano al massimo 10 giorni di negoziazione, quindi un titolo può
+  essere escluso per una sospensione scaduta da tempo.
+- **Fails-to-deliver** - contesto sullo stress di regolamento dai dati sui
+  fails-to-deliver che la SEC pubblica due volte al mese (solo contesto - di per sé
+  non è prova di manipolazione).
+- **Comment letter della SEC** - se la Division of Corporation Finance ha
+  corrisposto con la società nell'ultimo anno, quante lettere e quante risposte
+  dell'emittente cadono in quella finestra e la data della lettera più recente.
+  Solo contesto, mai valutato. Il registro dei depositi riporta la lettera, ma non
+  il suo oggetto.
+- **Classificazione settoriale** - il settore SIC di ciascuna società viene
+  registrato e mostrato. È solo contesto: il punteggio usa bande di riferimento
+  fisse, non il confronto con società comparabili.
+
+## Come funziona il punteggio
+
+Il composito è un **punteggio di ricerca ponderato per il rischio e non normalizzato**:
+
+    composito = somma(peso x sotto-punteggio positivo) - somma(penalità x gravità x confidenza)
+
+* I **contributori positivi** sono valutati rispetto a **bande di riferimento
+  fisse**: la scala Piotroski 0-9, le zone di solvibilità Altman Z″ e bande fisse
+  di EV/Ricavi e di crescita dei ricavi. Il sotto-punteggio di una società dipende
+  quindi solo dalle sue dichiarazioni, non da quali altri ticker fossero
+  nell'esecuzione, ed è confrontabile tra esecuzioni diverse.
+* Le **penalità** sottraggono, scalate per gravità e per il preset attivo.
+* **Più basso significa che è stato trovato più rischio ricavato dalle
+  dichiarazioni.** Non è una valutazione, non è una previsione e non è
+  confrontabile con un prezzo obiettivo. Un punteggio alto significa "è stato
+  trovato meno rischio nelle dichiarazioni", mai "questo salirà".
+* Il punteggio **non è limitato** e non ha un intervallo fisso; trattalo come un
+  ordinamento, non come una grandezza.
+
+**Un ticker per cui non è stato possibile recuperare alcuna prova SEC non viene
+valutato.** Viene riportato come `NOT ASSESSED`, nominato sulla console ed escluso
+dalla classifica, così che l'assenza di prove non venga mai scambiata per assenza
+di rischio.
+
+**La salute finanziaria usa soglie ri-ancorate, non le bande pubblicate di
+Altman.** Altman Z″ è calcolato con i suoi coefficienti pubblicati, ma le soglie di
+solvibilità sono **-3,0 e 1,0**, non le pubblicate 1,1 e 2,6, e il sotto-punteggio
+è valutato in modo continuo anziché in tre gradini. Misurato su 194 soggetti reali,
+usando il linguaggio di continuità aziendale (going concern) nel bilancio annuale
+di ciascuna società come etichetta indipendente di difficoltà: alle soglie
+pubblicate **nessuno dei 41 soggetti in continuità aziendale è stato mancato, ma 47
+soggetti sani su 153 sono stati classificati in difficoltà** - tra cui Starbucks,
+HP, AbbVie, Amgen, Oracle, Lowe's, Duke Energy e AT&T. La soglia pubblicata di 1,1
+si colloca al 45° percentile della distribuzione reale. Le soglie ri-ancorate
+riducono quel tasso di falsa difficoltà dal 31% al 12% e continuano a non
+classificare come sicuro alcun soggetto in continuità aziendale. È uno scostamento
+deliberato dal modello pubblicato.
+
+Le esportazioni riportano le colonne `suppressed`, `suppressed_count`,
+`evidence_complete` e `completeness`, così che una riga valutata si distingua da
+una non valutata senza leggere il testo.
+
+## Limiti
+
+Leggili prima di fidarti di una classifica.
+
+* **Due contributori sono permanentemente a zero.** `valuation` e `sentiment` non
+  hanno alcuna fonte dati in questa build - non c'è un feed di capitalizzazione di
+  mercato né un feed di notizie - quindi sono soppressi per ogni società, a ogni
+  esecuzione.
+* **Altman non è calcolabile per circa un quarto delle large cap.** Banche e REIT
+  non pubblicano uno stato patrimoniale classificato, e diversi grandi soggetti non
+  pubblicano un subtotale di risultato operativo. Dove non è calcolabile viene
+  soppresso e riportato, mai imputato - ma il contributore di salute finanziaria
+  manca allora del tutto per quel titolo.
+* **La maggior parte delle righe poggia su prove incomplete.** In una scansione
+  rappresentativa di 20 titoli, 18 avevano almeno un controllo che non è stato
+  possibile eseguire. La colonna `suppressed_count` indica quanti, per riga.
+* **Lo strumento classifica in modo debole, non autorevole.** È utile per decidere
+  quali dichiarazioni leggere per prime. Non è uno screening su cui agire
+  direttamente, e nessun singolo segnale va trattato come un verdetto.
+* **L'attività di comment letter è storia, non una questione aperta.** La SEC
+  pubblica una lettera dello staff non prima di 20 giorni lavorativi dalla
+  chiusura della revisione, e il registro dei depositi non ne riporta l'oggetto.
+  Lo strumento può dirti che c'è stata corrispondenza e quando; non può dirti che
+  cosa è stato chiesto né se resti qualcosa in sospeso. Una lettera senza un
+  deposito di risposta associato non è una lettera rimasta senza risposta: gli
+  emittenti rispondono abitualmente all'interno di un altro deposito.
+* **Un titolo in watchlist non produce mai un avviso alla prima esecuzione.** Gli
+  avvisi si calcolano rispetto allo snapshot precedente, quindi una società non
+  segnala nulla finché non è stata analizzata almeno due volte.
+* **Nessuna cache.** Ogni esecuzione riscarica da SEC EDGAR. Le impostazioni
+  `cache_ttl` mostrate da `config get` sono inerti.
 
 ## Dati e attribuzione
 
@@ -192,13 +279,13 @@ pennytune --json inspect GROW | jq '.inspect'   # machine-readable
 esplicitamente o letti dalla tua watchlist - in base ai loro segnali di rischio
 nelle dichiarazioni SEC (nessun filtro sul prezzo - lo strumento non recupera
 alcun prezzo). Al massimo 100 ticker per esecuzione; PennyTune non analizza mai
-l'intero mercato. Poiché i sotto-punteggi di qualità positivi sono percentili
-relativi al settore/dimensione (significativi solo su un'ampia sezione
-trasversale), su un piccolo insieme selezionato la classifica è determinata
-principalmente dai segnali di **rischio/penalità** (diluizione, difficoltà,
-delisting, vendite degli insider) - fa emergere i nomi più rischiosi del tuo
-insieme. Regola la ponderazione del rischio e la strategia con `--preset` /
-`--profile`:
+l'intero mercato. I sotto-punteggi positivi sono valutati rispetto a **bande di
+riferimento fisse**, quindi il punteggio di una società non dipende da quali altri
+ticker fossero nell'esecuzione ed è confrontabile tra esecuzioni diverse. La
+classifica resta comunque determinata principalmente dai segnali di
+**rischio/penalità** (diluizione, difficoltà, delisting, vendite degli insider),
+poiché sono quelli che le dichiarazioni sostengono meglio. Regola la ponderazione e
+la strategia con `--preset` / `--profile`:
 
 ```bash
 pennytune scan AAA BBB CCC                       # rank the tickers you name
@@ -221,16 +308,15 @@ pennytune --help              # all commands and global flags
 pennytune --version           # app version + pinned dependency versions
 pennytune disclaimer          # print the full legal disclaimer
 pennytune watch add GROW NUKK # persistent watchlist (add | list | rm)
-pennytune watch list          #   run-over-run score deltas + alerts
+pennytune watch list          #   run-over-run score deltas
 pennytune config get          # view all settings (EDGAR email redacted)
 pennytune config set weights.valuation 1.5   # tune a scoring weight
 pennytune config set profile custom          # switch to hand-tuned weights
-pennytune sources             # data sources, free-tier limits, contacted domains
+pennytune sources             # data sources, rate limits, contacted domains
 ```
 
-L'output si apre con un'intestazione di freschezza (preset/profilo attivo +
-timestamp as-of per dominio), mostra un banner di avviso della watchlist quando
-pertinente, classifica i primi N e termina con l'avvertenza breve. I file
+L'output di `scan` si apre con un'intestazione (preset/profilo attivo + righe di
+freschezza dei dati), classifica i primi N e termina con l'avvertenza breve. I file
 esportati riportano l'intestazione dell'avvertenza su una riga, in modo che
 l'avvertenza viaggi insieme ai dati.
 
