@@ -5,7 +5,7 @@ matter for a slice of the market - orthogonal to the strategy profile, which
 decides *how signals are weighted for an investing style*. The two compose
 (e.g. ``--preset small-cap-value --profile hold``).
 
-A preset no longer filters the universe by price or size (the tool fetches no
+A preset does not filter the universe by price or size (the tool fetches no
 prices); it only tunes the scoring weights. Penny-native modules carry full
 weight under ``penny`` and are progressively de-emphasized toward ``broad``;
 up-market modules are dormant under ``penny`` and weighted in under ``broad``.
