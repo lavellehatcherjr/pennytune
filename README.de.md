@@ -61,9 +61,13 @@ eine Tretmine ist, rät weder zum Kauf noch zum Verkauf und sagt keine Ergebniss
 das Urteil liegt bei Ihnen.
 
 - **Kostenlos & ohne API-Schlüssel** - läuft vollständig mit öffentlichen Daten ohne Konto und ohne Schlüssel.
-- **SEC-registriert, an einer großen US-Börse notiert (NYSE/NASDAQ/NYSE American), niemals OTC** - per Konstruktion.
-- **Belegbasiert** - jedes Signal wird aus den öffentlichen SEC-Einreichungen des
-  Unternehmens berechnet, und bei ereignisgetriebenen Warnsignalen wird der konkrete 8-K-Punkt benannt.
+- **SEC-registrierte Einreicher** - das Ticker-Universum stammt aus öffentlichen
+  SEC-Daten. Es gibt keinen Börsenfilter: OTC-notierte Namen werden wie alle anderen
+  gescannt, und die zugrunde liegende SEC-Datei enthält keine NYSE-American-Kennzeichnung.
+- **Belegbasiert** - die Signale, die berechnet werden, stammen aus den öffentlichen
+  SEC-Einreichungen des Unternehmens, und bei ereignisgetriebenen Warnsignalen wird der
+  konkrete 8-K-Punkt benannt. Zwei Beitragende, Bewertung und Berichtston, haben in diesem
+  Build keine Datenquelle und werden immer unterdrückt (siehe **Einschränkungen**).
 - **Transparent & abstimmbar** - ein zerlegbarer zusammengesetzter Score mit benutzerseitig
   bearbeitbaren Gewichtungen, Screening-Voreinstellungen (`penny` Standard / `micro` / `small-cap-value` /
   `broad` / `custom`) sowie auswählbaren Strategieprofilen (`hold` Standard /
@@ -75,7 +79,8 @@ das Urteil liegt bei Ihnen.
 ## Was es offenlegt
 
 Für jedes Unternehmen liest PennyTune die SEC-Einreichungen und bewertet die Signale, die
-für einen Micro-Cap am wichtigsten sind - jedes davon aus den Einreichungen des Unternehmens berechnet:
+für einen Micro-Cap am wichtigsten sind. Jedes Signal, das nicht berechnet werden kann,
+wird unterdrückt und als solches gemeldet, niemals als Null gewertet:
 
 - **Finanzielle Gesundheit & Insolvenzgefahr** - Altman-Z″-Solvenzbewertung sowie eine
   forensische Reihe (Beneish-Modell zur Gewinnmanipulation und Piotroski-Stärkemodell) über die
@@ -86,20 +91,100 @@ für einen Micro-Cap am wichtigsten sind - jedes davon aus den Einreichungen des
 - **Insider-Aktivitäten** - Insider-*Käufe* am offenen Markt (das Überzeugungssignal),
   klar getrennt von routinemäßigen Zuteilungen und Steuereinbehaltung, sodass Zuteilungen niemals als
   optimistisch gelesen werden - sowie Überhang aus geplanten Verkäufen (Form 144) und 13D/13G-Eigentumsaktivität.
-- **Wesentliche Ereignisse aus 8-K-Meldungen** - das strukturierte Band der Item-Codes (Restatements, Wirtschaftsprüfer-
-  wechsel, Abgänge von Führungskräften, Notierungsdefizite und andere wesentliche Punkte),
-  gewichtet nach Schweregrad statt nach reiner Anzahl.
+- **Wesentliche Ereignisse aus 8-K-Meldungen** - das strukturierte Band der Item-Codes,
+  gewichtet nach Schweregrad statt nach reiner Anzahl. Item 4.02, mit dem der Emittent
+  erklärt, dass auf seine eigenen zuvor veröffentlichten Abschlüsse nicht mehr vertraut
+  werden kann, wird getrennt von Item 4.01, einem Wirtschaftsprüferwechsel, benannt und
+  gezählt - neben Abgängen von Führungskräften, Notierungsdefiziten und den übrigen
+  wesentlichen Punkten.
 - **Delisting-Hinweis-Risiko** - offengelegte Hinweise auf Defizite bei der fortgesetzten Notierung
   (8-K Item 3.01), gemeldet ohne zu erraten, wie viele Tage die Kursfrist umfasst, die das Tool
   nicht berechnen kann.
-- **Aktive Handelsaussetzungen** - ein Unternehmen, das einer *aktuellen* SEC-Handelsaussetzung
-  unterliegt, wird gekennzeichnet und ausgeschlossen; abgelaufene historische Aussetzungen werden
-  als Kontext angezeigt und nicht zulasten des Unternehmens gewertet.
-- **Fails-to-Deliver** - Kontext zu Abwicklungsstress aus den zweimonatlichen
-  Fails-to-Deliver-Daten der SEC (nur Kontext - für sich allein kein Beleg für Manipulation).
-- **Sektorklassifizierung** - der SIC-Sektor jedes Unternehmens, sodass Qualitäts- und
-  Bewertungsvergleiche gegen Vergleichswerte nach Sektor und Größe statt gegen absolute
-  Schwellenwerte angestellt werden.
+- **Handelsaussetzungen** - ein Unternehmen mit einer SEC-Handelsaussetzung in den
+  letzten 180 Tagen wird gekennzeichnet und ausgeschlossen. Beachten Sie, dass das Tool
+  nicht verfolgt, ob die Aussetzung inzwischen abgelaufen ist: SEC-Aussetzungen dauern
+  höchstens 10 Handelstage, ein Name kann also wegen einer längst abgelaufenen
+  Aussetzung ausgeschlossen werden.
+- **Fails-to-Deliver** - Kontext zu Abwicklungsstress aus den zweimal monatlich
+  veröffentlichten Fails-to-Deliver-Daten der SEC (nur Kontext - für sich allein kein
+  Beleg für Manipulation).
+- **Kommentarbriefe der SEC** - ob die Division of Corporation Finance im letzten Jahr
+  mit dem Unternehmen korrespondiert hat, wie viele Briefe und Antworten des Emittenten
+  in dieses Fenster fallen und das Datum des jüngsten Briefs. Nur Kontext, wird niemals
+  bewertet. Das Einreichungsverzeichnis führt den Brief, nicht aber sein Thema.
+- **Sektorklassifizierung** - der SIC-Sektor jedes Unternehmens wird erfasst und angezeigt.
+  Er dient nur als Kontext: die Bewertung verwendet feste Referenzbänder, keinen
+  Vergleich mit Peers.
+
+## Wie der Score funktioniert
+
+Der zusammengesetzte Score ist ein **nicht normalisierter, risikogewichteter Recherche-Score**:
+
+    Score = Summe(Gewicht x positiver Subscore) - Summe(Strafe x Schweregrad x Konfidenz)
+
+* **Positive Beitragende** werden gegen **feste Referenzbänder** bewertet - die
+  Piotroski-Skala 0-9, die Altman-Z″-Solvenzzonen sowie feste EV/Umsatz- und
+  Umsatzwachstumsbänder. Der Subscore eines Unternehmens hängt damit nur von seinen
+  eigenen Einreichungen ab, nicht davon, welche anderen Ticker im Durchlauf waren, und
+  ist über Durchläufe hinweg vergleichbar.
+* **Strafen** werden abgezogen, skaliert nach Schweregrad und aktiver Voreinstellung.
+* **Niedriger bedeutet, dass mehr aus Einreichungen abgeleitetes Risiko gefunden wurde.**
+  Es ist keine Bewertung, keine Prognose und nicht mit einem Kursziel vergleichbar. Ein
+  hoher Score bedeutet „in den Einreichungen wurde weniger Risiko gefunden", niemals
+  „das wird steigen".
+* Der Score ist **nicht begrenzt** und hat keinen festen Bereich; behandeln Sie ihn als
+  Reihenfolge, nicht als Größenordnung.
+
+**Ein Ticker ohne abgerufene SEC-Belege wird nicht bewertet.** Er wird als `NOT ASSESSED`
+gemeldet, auf der Konsole benannt und aus der Einstufung ausgeschlossen, damit fehlende
+Belege niemals mit fehlendem Risiko verwechselt werden.
+
+**Die finanzielle Gesundheit verwendet neu verankerte Schwellenwerte, nicht Altmans
+veröffentlichte Bänder.** Altman Z″ wird mit seinen veröffentlichten Koeffizienten
+berechnet, aber die Solvenzschwellen liegen bei **-3,0 und 1,0** statt bei den
+veröffentlichten 1,1 und 2,6, und der Subscore wird kontinuierlich statt in drei Stufen
+bewertet. Gemessen an 194 realen Einreichern, mit der Going-Concern-Formulierung im
+jeweiligen Jahresbericht als unabhängigem Insolvenz-Label: bei den veröffentlichten
+Schwellen wurde **keiner der 41 Going-Concern-Einreicher übersehen, aber 47 von 153
+gesunden Einreichern wurden als insolvenzgefährdet eingestuft** - darunter Starbucks, HP,
+AbbVie, Amgen, Oracle, Lowe's, Duke Energy und AT&T. Die veröffentlichte Schwelle 1,1
+liegt im 45. Perzentil der realen Verteilung. Die neu verankerten Schwellen senken diese
+Falsch-Insolvenz-Rate von 31 % auf 12 % und stufen weiterhin keinen Going-Concern-Einreicher
+als sicher ein. Dies ist eine bewusste Abweichung vom veröffentlichten Modell.
+
+Exporte enthalten die Spalten `suppressed`, `suppressed_count`, `evidence_complete` und
+`completeness`, sodass eine bewertete Zeile ohne Lesen von Fließtext von einer
+unbewerteten unterschieden werden kann.
+
+## Einschränkungen
+
+Lesen Sie diese, bevor Sie einer Einstufung vertrauen.
+
+* **Zwei Beitragende sind dauerhaft null.** `valuation` und `sentiment` haben in diesem
+  Build keine Datenquelle - es gibt keinen Marktkapitalisierungs- und keinen Nachrichten-Feed -
+  und werden daher für jedes Unternehmen bei jedem Durchlauf unterdrückt.
+* **Altman ist für etwa ein Viertel der Large Caps nicht berechenbar.** Banken und REITs
+  veröffentlichen keine klassifizierte Bilanz, und eine Reihe großer Einreicher veröffentlicht
+  keinen Betriebsergebnis-Zwischenwert. Wo es nicht berechnet werden kann, wird es unterdrückt
+  und gemeldet, niemals imputiert - der Beitrag zur finanziellen Gesundheit fehlt dann jedoch
+  für diesen Namen vollständig.
+* **Die meisten Zeilen beruhen auf unvollständigen Belegen.** In einem repräsentativen Scan
+  mit 20 Namen hatten 18 mindestens eine Prüfung, die nicht durchgeführt werden konnte. Die
+  Spalte `suppressed_count` gibt an, wie viele es pro Zeile sind.
+* **Das Tool stuft schwach ein, nicht maßgeblich.** Es ist nützlich, um zu entscheiden,
+  welche Einreichungen zuerst zu lesen sind. Es ist kein Screening, nach dem Sie direkt
+  handeln sollten, und kein einzelnes Warnsignal ist als Urteil zu behandeln.
+* **Kommentarbrief-Aktivität ist Historie, keine offene Frage.** Die SEC veröffentlicht
+  einen Brief der Aufsicht frühestens 20 Geschäftstage nach Abschluss der Prüfung, und das
+  Einreichungsverzeichnis enthält kein Thema. Das Tool kann Ihnen sagen, dass korrespondiert
+  wurde und wann; es kann Ihnen nicht sagen, was gefragt wurde oder ob noch etwas offen ist.
+  Ein Brief ohne zugehörige Antwort-Einreichung ist kein unbeantworteter Brief - Emittenten
+  antworten regelmäßig innerhalb einer anderen Einreichung.
+* **Ein beobachteter Wert löst beim ersten Durchlauf nie eine Warnung aus.** Warnungen werden
+  gegen die vorherige Momentaufnahme berechnet; ein Unternehmen meldet also nichts, bevor es
+  mindestens zweimal gescannt wurde.
+* **Kein Cache.** Jeder Durchlauf ruft die Daten erneut von SEC EDGAR ab. Die von
+  `config get` angezeigten `cache_ttl`-Einstellungen sind wirkungslos.
 
 ## Daten & Quellenangabe
 
@@ -166,11 +251,12 @@ pennytune --json inspect GROW | jq '.inspect'   # machine-readable
 `scan` stuft eine **kuratierte, von Ihnen gewählte Auswahl an Tickern** ein - explizit angegeben oder aus
 Ihrer Beobachtungsliste eingelesen - nach ihren Risikosignalen aus SEC-Einreichungen (keine Kursfilterung - das
 Tool ruft keine Kurse ab). Höchstens 100 Ticker pro Durchlauf; PennyTune durchsucht niemals den
-gesamten Markt. Da die positiven Qualitäts-Subscores sektor-/größenrelative Perzentile sind
-(nur über einen großen Querschnitt aussagekräftig), wird die Einstufung bei einer kleinen kuratierten
-Auswahl hauptsächlich von den **Risiko-/Strafsignalen** bestimmt (Verwässerung,
-Insolvenzgefahr, Delisting, Insider-Verkäufe) - sie legt die riskantesten Namen in Ihrer
-Auswahl offen. Stimmen Sie die Risikogewichtung und die Strategie mit `--preset` / `--profile` ab:
+gesamten Markt. Positive Subscores werden gegen **feste Referenzbänder** bewertet, sodass der
+Score eines Unternehmens nicht davon abhängt, welche anderen Ticker im Durchlauf waren, und
+über Durchläufe hinweg vergleichbar ist. Die Einstufung wird dennoch hauptsächlich von den
+**Risiko-/Strafsignalen** bestimmt (Verwässerung, Insolvenzgefahr, Delisting,
+Insider-Verkäufe), da diese von den Einreichungen am besten gestützt werden. Stimmen Sie die
+Gewichtung und die Strategie mit `--preset` / `--profile` ab:
 
 ```bash
 pennytune scan AAA BBB CCC                       # rank the tickers you name
@@ -193,17 +279,17 @@ pennytune --help              # all commands and global flags
 pennytune --version           # app version + pinned dependency versions
 pennytune disclaimer          # print the full legal disclaimer
 pennytune watch add GROW NUKK # persistent watchlist (add | list | rm)
-pennytune watch list          #   run-over-run score deltas + alerts
+pennytune watch list          #   run-over-run score deltas
 pennytune config get          # view all settings (EDGAR email redacted)
 pennytune config set weights.valuation 1.5   # tune a scoring weight
 pennytune config set profile custom          # switch to hand-tuned weights
-pennytune sources             # data sources, free-tier limits, contacted domains
+pennytune sources             # data sources, rate limits, contacted domains
 ```
 
-Die Ausgabe beginnt mit einem Aktualitäts-Header (aktive Voreinstellung/aktives Profil + Stand-Stempel
-je Domain), zeigt bei Bedarf ein Beobachtungslisten-Warnbanner an, stuft die Top N ein und endet
-mit dem kurzen Haftungsausschluss. Exportierte Dateien tragen die einzeilige Haftungsausschluss-Kopfzeile,
-sodass der Haftungsausschluss mit den Daten mitreist.
+Die `scan`-Ausgabe beginnt mit einem Header (aktive Voreinstellung/aktives Profil +
+Aktualitätszeilen), stuft die Top N ein und endet mit dem kurzen Haftungsausschluss.
+Exportierte Dateien tragen die einzeilige Haftungsausschluss-Kopfzeile, sodass der
+Haftungsausschluss mit den Daten mitreist.
 
 ## Entwicklung
 
