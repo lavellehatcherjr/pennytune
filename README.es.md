@@ -68,10 +68,15 @@ el juicio es tuyo.
 
 - **Gratuito y sin claves de API**: funciona enteramente con datos públicos, sin
   cuenta y sin clave.
-- **Registrada ante la SEC, cotizada en una bolsa importante de EE. UU. (NYSE/NASDAQ/NYSE American), nunca OTC**: por construcción.
-- **Basado en evidencia**: cada señal se calcula a partir de las presentaciones
-  públicas de la empresa ante la SEC y, para las red flags impulsadas por
-  eventos, se nombra el ítem específico del 8-K.
+- **Entidades registradas ante la SEC**: el universo de tickers procede de datos
+  públicos de la SEC. No hay filtro por bolsa: los nombres cotizados en OTC se
+  escanean como cualquier otro, y el archivo de la SEC en el que se basa no lleva
+  designación NYSE American.
+- **Basado en evidencia**: las señales que sí se calculan provienen de las
+  presentaciones públicas de la empresa ante la SEC y, para las red flags
+  impulsadas por eventos, se nombra el ítem específico del 8-K. Dos contribuyentes,
+  valoración y tono de cobertura, no tienen fuente de datos en esta compilación y
+  siempre se suprimen (ver **Limitaciones**).
 - **Transparente y ajustable**: una puntuación compuesta descomponible con pesos
   editables por el usuario, presets de cribado (`penny` por defecto / `micro` /
   `small-cap-value` / `broad` / `custom`) y perfiles de estrategia seleccionables
@@ -83,8 +88,8 @@ el juicio es tuyo.
 ## Qué hace aflorar
 
 Para cada empresa, PennyTune lee las presentaciones ante la SEC y califica las
-señales que más importan para una micro-cap, cada una de ellas calculada a partir
-de las presentaciones de la empresa:
+señales que más importan para una micro-cap. Toda señal que no pueda calcular se
+suprime y se reporta como tal, nunca se puntúa como cero:
 
 - **Salud financiera e insolvencia**: puntuación de solvencia Altman Z″ más una
   batería forense (los modelos de manipulación de beneficios de Beneish y de
@@ -99,23 +104,105 @@ de las presentaciones de la empresa:
   la retención fiscal para que las adjudicaciones (awards) nunca se interpreten
   como alcistas, más el sobrante (overhang) de ventas propuestas del Form 144 y
   la actividad de propiedad 13D/13G.
-- **Eventos materiales del 8-K**: la cinta estructurada de códigos de ítem
-  (reexpresiones, cambios de auditor, salidas de directivos, deficiencias de
-  cotización y otros ítems materiales), ponderada por gravedad en lugar de por
-  conteo bruto.
+- **Eventos materiales del 8-K**: la cinta estructurada de códigos de ítem,
+  ponderada por gravedad en lugar de por conteo bruto. El Ítem 4.02, con el que
+  el emisor declara que ya no se puede confiar en sus propios estados
+  financieros previamente publicados, se nombra y se cuenta por separado del
+  Ítem 4.01, un cambio de auditor, junto a las salidas de directivos, las
+  deficiencias de cotización y el resto de ítems materiales.
 - **Riesgo de aviso de exclusión de cotización (delisting)**: avisos de
   deficiencia de cotización continuada divulgados (8-K Ítem 3.01), reportados sin
   adivinar el conteo de días del reloj de precios (price-clock) que la herramienta
   no puede calcular.
-- **Suspensiones activas de la negociación**: una empresa bajo una suspensión de
-  negociación *vigente* de la SEC se marca y se excluye; las suspensiones
-  históricas vencidas se muestran como contexto, no en contra de la empresa.
+- **Suspensiones de la negociación**: una empresa con una suspensión de
+  negociación de la SEC en los últimos 180 días se marca y se excluye. Ten en
+  cuenta que la herramienta no rastrea si la suspensión ya ha caducado: las
+  suspensiones de la SEC duran como máximo 10 días de negociación, así que un
+  nombre puede quedar excluido por una suspensión vencida hace mucho.
 - **Fails-to-deliver**: contexto de estrés de liquidación a partir de los datos
-  bimensuales de fails-to-deliver de la SEC (solo contexto, no es evidencia de
-  manipulación por sí solo).
-- **Clasificación sectorial**: el sector SIC de cada empresa, de modo que las
-  comparaciones de calidad y valoración se hagan frente a pares de sector y tamaño
-  en lugar de cortes absolutos.
+  de fails-to-deliver que la SEC publica dos veces al mes (solo contexto, no es
+  evidencia de manipulación por sí solo).
+- **Cartas de comentarios (comment letters) de la SEC**: si la División de
+  Finanzas Corporativas mantuvo correspondencia con la empresa en el último año,
+  cuántas cartas y cuántas respuestas del emisor caen en esa ventana, y la fecha
+  de la carta más reciente. Solo contexto, nunca se puntúa. El registro de
+  presentaciones deja constancia de la carta, pero no de su asunto.
+- **Clasificación sectorial**: el sector SIC de cada empresa se registra y se
+  muestra. Es solo contexto: la puntuación usa bandas de referencia fijas, no
+  comparación con pares.
+
+## Cómo funciona la puntuación
+
+La puntuación compuesta es una **puntuación de investigación ponderada por riesgo
+y sin normalizar**:
+
+    compuesta = suma(peso x subpuntuación positiva) - suma(penalización x gravedad x confianza)
+
+* Los **contribuyentes positivos** se califican frente a **bandas de referencia
+  fijas**: la escala Piotroski 0-9, las zonas de solvencia Altman Z″ y bandas
+  fijas de EV/Ventas y de crecimiento de ingresos. La subpuntuación de una empresa
+  depende por tanto solo de sus propias presentaciones, no de qué otros tickers
+  hubiera en la ejecución, y es comparable entre ejecuciones.
+* Las **penalizaciones** restan, escaladas por gravedad y por el preset activo.
+* **Más bajo significa que se encontró más riesgo derivado de las presentaciones.**
+  No es una valoración, no es una predicción y no es comparable a un precio
+  objetivo. Una puntuación alta significa "se encontró menos riesgo en las
+  presentaciones", nunca "esto va a subir".
+* La puntuación **no está acotada** y no tiene rango fijo; trátala como un orden,
+  no como una magnitud.
+
+**Un ticker sin evidencia obtenida de la SEC no se puntúa.** Se reporta como
+`NOT ASSESSED`, se nombra en la consola y se excluye de la clasificación, de modo
+que la ausencia de evidencia nunca se confunda con ausencia de riesgo.
+
+**La salud financiera usa cortes reanclados, no las bandas publicadas de Altman.**
+Altman Z″ se calcula con sus coeficientes publicados, pero los cortes de solvencia
+son **-3,0 y 1,0**, no los publicados 1,1 y 2,6, y la subpuntuación se califica de
+forma continua en lugar de en tres escalones. Medido sobre 194 entidades reales,
+usando el lenguaje de empresa en funcionamiento (going concern) del propio informe
+anual de cada empresa como etiqueta independiente de insolvencia: con los cortes
+publicados **no se escapó ninguna de las 41 entidades con going concern, pero 47 de
+153 entidades sanas fueron calificadas como insolventes**, entre ellas Starbucks,
+HP, AbbVie, Amgen, Oracle, Lowe's, Duke Energy y AT&T. El límite publicado de 1,1
+se sitúa en el percentil 45 de la distribución real. Los cortes reanclados reducen
+esa tasa de falsa insolvencia del 31 % al 12 % y siguen sin calificar como segura a
+ninguna entidad con going concern. Es una desviación deliberada del modelo publicado.
+
+Las exportaciones llevan las columnas `suppressed`, `suppressed_count`,
+`evidence_complete` y `completeness`, de modo que se puede distinguir una fila
+evaluada de una no evaluada sin leer prosa.
+
+## Limitaciones
+
+Léelas antes de confiar en una clasificación.
+
+* **Dos contribuyentes son permanentemente cero.** `valuation` y `sentiment` no
+  tienen fuente de datos en esta compilación (no hay feed de capitalización de
+  mercado ni de noticias), así que se suprimen para todas las empresas, en todas
+  las ejecuciones.
+* **Altman no es calculable para aproximadamente una cuarta parte de las large
+  caps.** Los bancos y los REIT no publican un balance clasificado, y varias
+  entidades grandes no publican un subtotal de resultado operativo. Donde no se
+  puede calcular, se suprime y se reporta, nunca se imputa, pero entonces el
+  contribuyente de salud financiera falta por completo para ese nombre.
+* **La mayoría de las filas se apoyan en evidencia incompleta.** En un escaneo
+  representativo de 20 nombres, 18 tenían al menos una comprobación que no se pudo
+  ejecutar. La columna `suppressed_count` te dice cuántas, por fila.
+* **La herramienta clasifica de forma débil, no autorizada.** Sirve para decidir
+  qué presentaciones leer primero. No es un cribado sobre el que debas actuar
+  directamente, y ninguna señal aislada debe tratarse como un veredicto.
+* **La actividad de cartas de comentarios es historia, no una cuestión
+  abierta.** La SEC publica una carta del personal como muy pronto 20 días
+  hábiles después de cerrarse la revisión, y el registro de presentaciones no
+  recoge el asunto. La herramienta puede decirte que hubo correspondencia y
+  cuándo; no puede decirte qué se preguntó ni si queda algo pendiente. Una carta
+  sin una presentación de respuesta asociada no es una carta sin contestar: los
+  emisores responden habitualmente dentro de otra presentación.
+* **Un nombre vigilado nunca alerta en su primera ejecución.** Las alertas se
+  calculan contra la instantánea anterior, así que una empresa no levanta nada
+  hasta que se ha escaneado al menos dos veces.
+* **Sin caché.** Cada ejecución vuelve a descargar de SEC EDGAR. Los ajustes
+  `cache_ttl` que muestra `config get` son inertes.
 
 ## Datos y atribución
 
@@ -189,13 +276,13 @@ pennytune --json inspect GROW | jq '.inspect'   # machine-readable
 explícita o leídos de tu lista de seguimiento) por sus señales de riesgo de las
 presentaciones ante la SEC (sin filtrado por precio: la herramienta no obtiene
 precios). Como máximo 100 tickers por ejecución; PennyTune nunca escanea todo el
-mercado. Dado que las subpuntuaciones de calidad positivas son percentiles
-relativos al sector/tamaño (significativos solo a través de una gran sección
-transversal), en un conjunto curado pequeño la clasificación se rige
-principalmente por las señales de **riesgo/penalización** (dilución, insolvencia,
-delisting, ventas de insiders): hace aflorar los nombres más arriesgados de tu
-conjunto. Ajusta la ponderación del riesgo y la estrategia con `--preset` /
-`--profile`:
+mercado. Las subpuntuaciones positivas se califican frente a **bandas de
+referencia fijas**, así que la puntuación de una empresa no depende de qué otros
+tickers hubiera en la ejecución y es comparable entre ejecuciones. Aun así, la
+clasificación se rige principalmente por las señales de **riesgo/penalización**
+(dilución, insolvencia, delisting, ventas de insiders), porque son las que mejor
+sostienen las presentaciones. Ajusta la ponderación y la estrategia con
+`--preset` / `--profile`:
 
 ```bash
 pennytune scan AAA BBB CCC                       # rank the tickers you name
@@ -218,18 +305,17 @@ pennytune --help              # all commands and global flags
 pennytune --version           # app version + pinned dependency versions
 pennytune disclaimer          # print the full legal disclaimer
 pennytune watch add GROW NUKK # persistent watchlist (add | list | rm)
-pennytune watch list          #   run-over-run score deltas + alerts
+pennytune watch list          #   run-over-run score deltas
 pennytune config get          # view all settings (EDGAR email redacted)
 pennytune config set weights.valuation 1.5   # tune a scoring weight
 pennytune config set profile custom          # switch to hand-tuned weights
-pennytune sources             # data sources, free-tier limits, contacted domains
+pennytune sources             # data sources, rate limits, contacted domains
 ```
 
-La salida comienza con un encabezado de actualidad (preset/perfil activo + marcas
-de "a fecha de" (as-of) por dominio), muestra un banner de alerta de la lista de
-seguimiento cuando es relevante, clasifica los N principales y termina con el
-aviso legal breve. Los archivos exportados llevan el encabezado de aviso legal de
-una línea, de modo que el aviso legal viaja con los datos.
+La salida de `scan` comienza con un encabezado (preset/perfil activo + líneas de
+actualidad de los datos), clasifica los N principales y termina con el aviso legal
+breve. Los archivos exportados llevan el encabezado de aviso legal de una línea,
+de modo que el aviso legal viaja con los datos.
 
 ## Desarrollo
 
