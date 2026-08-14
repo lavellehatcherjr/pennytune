@@ -4,6 +4,8 @@ These assert the package imports cleanly and the core public objects exist -
 the CLI app, the exit-code enum, and the three disclaimer constants.
 """
 
+import re
+
 import typer
 
 import pennytune
@@ -13,7 +15,10 @@ from pennytune.exit_codes import ExitCode
 
 
 def test_package_version() -> None:
-    assert pennytune.__version__ == "0.1.0"
+    # Shape only. Pinning the literal makes every release edit this test, which
+    # is the edit that hides a drift. The exact match against pyproject.toml
+    # lives in test_packaging.py.
+    assert re.fullmatch(r"\d+\.\d+\.\d+", pennytune.__version__)
 
 
 def test_cli_app_exists() -> None:
@@ -39,7 +44,7 @@ def test_disclaimer_constants_present() -> None:
     assert FULL_DISCLAIMER.startswith("DISCLAIMER — PLEASE READ CAREFULLY")
     assert "14. ACCEPTANCE." in FULL_DISCLAIMER
     assert FULL_DISCLAIMER.strip().endswith("do not install or use the software.")
-    # All 12 numbered sections present.
+    # Spot-check the low sections; test_doc_claims owns the real count invariant.
     for n in range(1, 13):
         assert f"\n{n}. " in "\n" + FULL_DISCLAIMER
 
