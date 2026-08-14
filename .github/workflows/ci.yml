@@ -37,7 +37,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          # The floor of requires-python, not the newest interpreter: mypy's
+          # python_version is 3.11, so checking on a newer runtime would let a
+          # 3.12-only construct pass here and break for a 3.11 user.
+          python-version: "3.11"
           cache: 'pip'
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev,schema]"
