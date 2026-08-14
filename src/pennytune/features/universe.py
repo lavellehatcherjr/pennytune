@@ -62,8 +62,8 @@ def parse_edgar_exchange_map(payload: dict[str, Any]) -> dict[str, EdgarListing]
     """Parse SEC ``company_tickers_exchange.json`` into a ticker->listing map.
 
     A reusable ticker -> (CIK, exchange) lookup for per-ticker CIK resolution.
-    The map keeps every ticker (including OTC); the never-OTC rule applied only
-    to the former whole-universe build, which no longer exists.
+    The map keeps every ticker, OTC included: there is no exchange filter, and
+    the caller decides which names to analyse.
     """
     fields, data = _columns(payload)
     try:
