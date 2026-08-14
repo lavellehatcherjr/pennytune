@@ -83,3 +83,18 @@ def test_module_entrypoint_scan_offline(tmp_path: Path) -> None:
     # Piped (non-TTY) → the full banner is suppressed; the disclaimer still ships.
     assert "Not investment advice" in scan.stdout
     assert "Tune out the noise." not in scan.stdout  # banner suppressed when piped
+
+
+def test_dunder_version_matches_pyproject() -> None:
+    """``__version__`` is hand-maintained separately from the build metadata.
+
+    Nothing else couples them, so they drift silently on a release bump and
+    ``pennytune --version`` starts lying.
+    """
+    import tomllib
+
+    from pennytune import __version__
+
+    root = Path(__file__).resolve().parents[1]
+    meta = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    assert meta["project"]["version"] == __version__
