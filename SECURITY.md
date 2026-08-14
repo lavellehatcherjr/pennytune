@@ -14,10 +14,6 @@ fix before public disclosure.
 
 Only the latest released version receives security updates.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
-
 ## Security Model
 
 PennyTune is a local command-line tool that fetches public data from SEC EDGAR
@@ -56,7 +52,10 @@ PennyTune is a local command-line tool that fetches public data from SEC EDGAR
 - **Data sent to the SEC.** To access SEC EDGAR, PennyTune sends your contact
   identity (name + email) to the SEC in the request `User-Agent`, as the SEC's
   fair-access policy requires. SEC EDGAR is the only network destination, so
-  your email is sent **only** to the SEC.
+  your email is sent to the SEC. Note the egress allow-list is enforced on the
+  response URL, i.e. after the request has been made, so a redirect to an
+  off-allow-list host would receive the `User-Agent` header before the check
+  rejects it. That path requires an attacker on the network or response path.
 - **Third-party public data, as is.** All analysis data comes from third-party
   public sources (SEC EDGAR) and is provided "as is"; PennyTune does not
   control those services' availability or the accuracy of their data. The full
