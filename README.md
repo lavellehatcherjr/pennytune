@@ -161,9 +161,13 @@ a landmine, does not advise buying or selling, and does not predict outcomes -
 the judgment is yours.
 
 - **Free & no API keys** - runs entirely on no-account, no-key public data.
-- **SEC-registered, listed on a major US exchange (NYSE/NASDAQ/NYSE American), never OTC** - by construction.
-- **Evidence-based** - every signal is computed from the company's public SEC
-  filings, and for event-driven red flags the specific 8-K item is named.
+- **SEC-registered filers** - the ticker universe comes from SEC public data.
+  There is no exchange filter: OTC-quoted names are scanned like any other,
+  and the SEC file this is built from carries no NYSE American designation.
+- **Evidence-based** - the signals that are computed come from the company's
+  public SEC filings, and for event-driven red flags the specific 8-K item is
+  named. Two contributors, valuation and coverage tone, have no data source in
+  this build and are always suppressed (see **Limitations**).
 - **Transparent & tunable** - a decomposable composite score with user-editable
   weights, screening presets (`penny` default / `micro` / `small-cap-value` /
   `broad` / `custom`), and selectable strategy profiles (`hold` default /
@@ -175,7 +179,8 @@ the judgment is yours.
 ## What it surfaces
 
 For each company, PennyTune reads the SEC filings and grades the signals that
-matter most for a micro-cap - every one computed from the company's filings:
+matter most for a micro-cap. Any signal it cannot compute is suppressed and
+reported as such, never scored as a zero:
 
 - **Financial health & distress** - Altman Z″ solvency scoring plus a forensic
   battery (Beneish earnings-manipulation and Piotroski strength models) over the
@@ -186,20 +191,96 @@ matter most for a micro-cap - every one computed from the company's filings:
 - **Insider activity** - open-market insider *buying* (the conviction signal),
   kept distinct from routine grants and tax-withholding so awards never read as
   bullish - plus Form 144 proposed-sale overhang and 13D/13G ownership activity.
-- **8-K material events** - the structured item-code tape (restatements, auditor
-  changes, officer departures, listing-deficiency and other material items),
-  weighted by severity rather than raw count.
+- **8-K material events** - the structured item-code tape, weighted by severity
+  rather than raw count. Item 4.02, the issuer stating that its own previously
+  issued financials can no longer be relied upon, is named and counted
+  separately from an Item 4.01 change of auditor, alongside officer departures,
+  listing-deficiency and the other material items.
 - **Delisting-notice risk** - disclosed continued-listing deficiency notices
   (8-K Item 3.01), reported without guessing the price-clock day-count the tool
   cannot compute.
-- **Active trading suspensions** - a company under a *current* SEC trading
-  suspension is flagged and held out; expired historical suspensions are shown
-  as context, not held against the company.
-- **Fails-to-deliver** - settlement-stress context from the SEC's bi-monthly
+- **Trading suspensions** - a company with an SEC trading suspension in the
+  last 180 days is flagged and held out. Note the tool does not track whether
+  the suspension has since lapsed: SEC suspensions run at most 10 trading
+  days, so a name can be held out on a suspension that has long expired.
+- **Fails-to-deliver** - settlement-stress context from the SEC's twice-monthly
   fails-to-deliver data (context only - not evidence of manipulation on its own).
-- **Sector classification** - each company's SIC sector, so quality and
-  valuation comparisons are made against sector-and-size peers rather than
-  absolute cutoffs.
+- **SEC staff comment letters** - whether the Division of Corporation Finance
+  corresponded with the company in the last year, how many letters and
+  registrant responses fall in that window, and the date of the most recent
+  letter. Context only, never scored. The filing index records the letter but
+  not its subject.
+- **Sector classification** - each company's SIC sector is recorded and shown.
+  It is context only: scoring uses fixed reference bands, not peer comparison.
+
+## How the score works
+
+The composite is an **unnormalized risk-weighted research score**:
+
+    composite = sum(weight x positive sub-score) - sum(penalty x severity x confidence)
+
+* **Positive contributors** are graded against **fixed reference bands** - the
+  Piotroski 0-9 scale, the Altman Z-double-prime zones, and fixed EV/Sales and
+  revenue-growth bands. A company's sub-score therefore depends only on its own
+  filings, not on which other tickers were in the run, and is comparable across
+  runs.
+* **Penalties** subtract, scaled by severity and by the active preset.
+* **Lower means more filing-derived risk was found.** It is not a valuation, not
+  a prediction, and not comparable to a price target. A high score means "less
+  risk was found in the filings", never "this will go up".
+* The score is **not clamped** and has no fixed range; treat it as an ordering,
+  not a magnitude.
+
+**A ticker with no fetched SEC evidence is not scored.** It is reported as
+`NOT ASSESSED`, named on the console, and excluded from the ranking, so absence
+of evidence is never mistaken for absence of risk.
+
+**Financial health uses re-anchored cutoffs, not Altman's published bands.**
+Altman Z-double-prime is computed with its published coefficients, but the
+solvency cutoffs are **-3.0 and 1.0**, not the published 1.1 and 2.6, and the
+sub-score is graded continuously rather than in three steps. Measured on 194
+real filers, using going-concern language in each company's own annual report as
+an independent distress label: at the published cutoffs **0 of 41 going-concern
+filers were missed, but 47 of 153 healthy filers were called distressed** -
+among them Starbucks, HP, AbbVie, Amgen, Oracle, Lowe's, Duke Energy and AT&T.
+The published 1.1 boundary sits at the 45th percentile of the real distribution.
+The re-anchored cutoffs cut that false-distress rate from 31% to 12% and still
+call no going-concern filer safe. This is a deliberate departure from the
+published model.
+
+Exports carry `suppressed`, `suppressed_count`, `evidence_complete` and
+`completeness` columns, so a reader can tell an assessed row from an unassessed
+one without reading prose.
+
+## Limitations
+
+Read these before trusting a ranking.
+
+* **Two contributors are permanently zero.** `valuation` and `sentiment` have no
+  data source in this build - there is no market-cap feed and no news feed - so
+  they are suppressed for every company, on every run.
+* **Altman is not computable for roughly a quarter of large caps.** Banks and
+  REITs do not publish a classified balance sheet, and a number of large filers
+  publish no operating-income subtotal. Where it cannot be computed it is
+  suppressed and reported, never imputed - but the financial-health contributor
+  is then missing entirely for that name.
+* **Most rows rest on incomplete evidence.** In a representative 20-name scan,
+  18 names had at least one check that could not be run. The
+  `suppressed_count` column tells you how many, per row.
+* **The tool ranks weakly, not authoritatively.** It is useful for deciding
+  which filings to read first. It is not a screen you should act on directly,
+  and no single flag should be treated as a verdict.
+* **Comment-letter activity is history, not an open question.** The SEC releases
+  a staff letter no earlier than 20 business days after the review has closed,
+  and the filing index carries no subject. The tool can tell you that
+  correspondence happened and when; it cannot tell you what was asked or whether
+  anything is still outstanding. A letter with no matching response filing is
+  not an unanswered one - registrants routinely reply inside another filing.
+* **A watched name never alerts on its first run.** Alerts are computed against
+  the previous snapshot, so a company raises nothing until it has been scanned
+  at least twice.
+* **No cache.** Every run re-fetches from SEC EDGAR. The `cache_ttl` settings
+  shown by `config get` are inert.
 
 ## Data & attribution
 
@@ -266,11 +347,12 @@ pennytune --json inspect GROW | jq '.inspect'   # machine-readable
 `scan` ranks a **curated set of tickers you choose** - given explicitly or read
 from your watchlist - by their SEC-filing risk signals (no price filtering - the
 tool fetches no prices). At most 100 tickers per run; PennyTune never scans the
-whole market. Because the positive quality sub-scores are sector/size-relative
-percentiles (meaningful only across a large cross-section), on a small curated
-set the ranking is driven mainly by the **risk/penalty** signals (dilution,
-distress, delisting, insider selling) - it surfaces the riskiest names in your
-set. Tune the risk weighting and strategy with `--preset` / `--profile`:
+whole market. Positive sub-scores are graded against **fixed reference bands**,
+so a company's score does not depend on which other tickers were in the run and
+is comparable across runs. The ranking is nonetheless driven mainly by the
+**risk/penalty** signals (dilution, distress, delisting, insider selling), since
+those are what the filings support best. Tune the weighting and strategy with
+`--preset` / `--profile`:
 
 ```bash
 pennytune scan AAA BBB CCC                       # rank the tickers you name
@@ -293,17 +375,16 @@ pennytune --help              # all commands and global flags
 pennytune --version           # app version + pinned dependency versions
 pennytune disclaimer          # print the full legal disclaimer
 pennytune watch add GROW NUKK # persistent watchlist (add | list | rm)
-pennytune watch list          #   run-over-run score deltas + alerts
+pennytune watch list          #   run-over-run score deltas
 pennytune config get          # view all settings (EDGAR email redacted)
 pennytune config set weights.valuation 1.5   # tune a scoring weight
 pennytune config set profile custom          # switch to hand-tuned weights
-pennytune sources             # data sources, free-tier limits, contacted domains
+pennytune sources             # data sources, rate limits, contacted domains
 ```
 
-Output leads with a freshness header (active preset/profile + per-domain as-of
-stamps), shows a watchlist alert banner when relevant, ranks the top N, and ends
-with the short disclaimer. Exported files carry the one-line disclaimer header
-so the disclaimer travels with the data.
+`scan` output leads with a header (active preset/profile + data-freshness
+lines), ranks the top N, and ends with the short disclaimer. Exported files
+carry the one-line disclaimer header so the disclaimer travels with the data.
 
 ## Development
 
