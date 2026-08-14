@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,36 +23,62 @@ from pathlib import Path
 from pennytune import paths
 
 __all__ = [
+    "GATE_ALERT_REASONS",
     "MATERIAL_ALERT_FLAGS",
     "SCORE_ALERT_DROP",
     "Snapshot",
     "SnapshotDiff",
     "WatchEntry",
     "diff_snapshots",
+    "snapshot_flags",
     "Watchlist",
 ]
 
-# New appearance of any of these flags raises a watchlist alert.
-MATERIAL_ALERT_FLAGS = frozenset(
+# Verbatim strings from ``Gates.reasons()``. The hard gates are the most
+# material transitions available, so they alert on sight.
+GATE_ALERT_REASONS = frozenset(
     {
-        "DILUTION-HIGH",
-        "DILUTION-SHELF-LARGE",
-        "ACTIVE-ATM",
-        "TOXIC-FINANCING",
-        "SERIAL-SPLITTER",
-        "OVERHANG-HIGH",
-        "DELISTING-DEFICIENCY",
-        "DELISTING-DETERMINATION",
-        "PRICE-SUB-10C",
-        "SEC-SUSPENSION",
-        "HALTED",
-        "RESTATEMENT",
-        "NT-RESTATEMENT",
-        "GOING-CONCERN",
-        "MANIPULATION-HIGH",
+        "active SEC trading suspension",
+        "disclosed delisting determination/suspension",
     }
 )
-SCORE_ALERT_DROP = 10.0  # a score drop of this magnitude raises an alert
+
+# A newly appearing flag from this set raises an alert.
+#
+# These are feature-flag names from the dilution, delisting, halt and
+# manipulation profiles, NOT scoring-module names. ``snapshot_flags`` has to
+# record the profiles' own flags or nothing here can ever match. Keep every
+# entry to something a profile actually appends; a name no code path emits
+# silently narrows the alert set.
+MATERIAL_ALERT_FLAGS = (
+    frozenset(
+        {
+            "ACTIVE-ATM",
+            "DELISTING-DEFICIENCY",
+            "DELISTING-DETERMINATION",
+            "DILUTION-SHELF-LARGE",
+            "DILUTION-VELOCITY-HIGH",
+            "GOING-CONCERN",
+            "NT-RESTATEMENT",
+            "OVERHANG-HIGH",
+            "PRICE-SUB-10C",
+            "RESTATEMENT",
+            "SEC-SUSPENSION",
+            "SERIAL-SPLITTER",
+            "SHELL-ARC",
+            "TOXIC-FINANCING",
+        }
+    )
+    | GATE_ALERT_REASONS
+)
+
+# A score drop of this magnitude alerts on its own.
+#
+# Calibrated against the real composite range under hold/penny: roughly -3.8 to
+# +2.1, with the largest single penalty contribution at 1.6. Sitting above that
+# 1.6 keeps this to compound deterioration the per-flag alerts would not already
+# name. Anything near the width of the whole range is unreachable in practice.
+SCORE_ALERT_DROP = 2.0
 
 
 @dataclass
@@ -111,6 +138,27 @@ def diff_snapshots(prior: Snapshot | None, current: Snapshot) -> SnapshotDiff:
         cleared_flags=cleared_flags,
         alerts=alerts,
     )
+
+
+def snapshot_flags(
+    penalty_modules: Iterable[str],
+    gate_reasons: Iterable[str],
+    feature_flags: Iterable[str],
+) -> list[str]:
+    """Combine the three flag vocabularies a snapshot has to carry.
+
+    Module names ("dilution") drive the human-readable delta. Feature flags
+    ("TOXIC-FINANCING") and gate reasons are what :data:`MATERIAL_ALERT_FLAGS`
+    matches on, so dropping either kills alerting outright.
+    """
+    ordered = sorted(penalty_modules) + list(gate_reasons) + sorted(set(feature_flags))
+    seen: set[str] = set()
+    unique: list[str] = []
+    for flag in ordered:
+        if flag not in seen:
+            seen.add(flag)
+            unique.append(flag)
+    return unique
 
 
 def _now(now: datetime | None) -> str:
