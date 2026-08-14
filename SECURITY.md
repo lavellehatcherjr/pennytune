@@ -3,7 +3,7 @@
 ## Reporting a Vulnerability
 
 Please report security vulnerabilities **privately** via GitHub's private
-vulnerability reporting — do **not** open a public issue for a vulnerability:
+vulnerability reporting  do **not** open a public issue for a vulnerability:
 
 - **<https://github.com/lavellehatcherjr/pennytune/security/advisories/new>**
 
